@@ -55,14 +55,17 @@ class EmployeeShiftStats(models.Model):
 
 # === Ячейки хранения ===
 class StorageLocation(models.Model):
-    zone = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(10)])
-    aisle = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(10)])
-    rack = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(10)])
-    shelf = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(10)])
-    bin = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(10)])
+    zone = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(5)])
+    aisle = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(5)])
+    rack = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(5)])
+    shelf = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(5)])
+    bin = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(5)])
+    is_occupied = models.BooleanField(default=False)
 
     class Meta:
         unique_together = ('zone', 'aisle', 'rack', 'shelf', 'bin')
+        verbose_name = "Ячейка хранения"
+        verbose_name_plural = "Ячейки хранения"
 
     def __str__(self):
         return f"З{self.zone}-П{self.aisle}-С{self.rack}-Пл{self.shelf}-Я{self.bin}"

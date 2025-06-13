@@ -17,7 +17,7 @@ from core.services.shifts import (
     remove_employee_from_shift
 )
 
-
+# === view для смен ===
 class ShiftViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Shift.objects.all()
     serializer_class = ShiftSerializer
@@ -59,3 +59,228 @@ class ShiftViewSet(viewsets.ReadOnlyModelViewSet):
         if success:
             return Response({"detail": "Сотрудник удалён из смены."})
         return Response({"detail": "Нельзя удалить сотрудника (смена уже началась или код не найден)."}, status=400)
+
+
+from rest_framework import viewsets, status
+from rest_framework.decorators import action
+from rest_framework.response import Response
+from rest_framework.exceptions import ValidationError, NotFound
+
+from core.models import Task, TaskAssignmentLog, Employee
+from core.serializers import (
+    TaskSerializer,
+    TaskCreateSerializer,
+    TaskAssignmentLogSerializer
+)
+from core.services.tasks import assign_task_to_best_employee, complete_task
+
+
+# === view для задач ===
+class TaskViewSet(viewsets.ModelViewSet):
+    queryset = Task.objects.all().order_by('-created_at')
+    serializer_class = TaskSerializer
+
+    def get_serializer_class(self):
+        if self.action == 'create':
+            return TaskCreateSerializer
+        return TaskSerializer
+
+    @action(detail=True, methods=["post"], url_path="assign")
+    def assign_manually(self, request, pk=None):
+        """Ручное назначение задачи сотруднику по коду"""
+        task = self.get_object()
+        employee_code = request.data.get("employee_code")
+        if not employee_code:
+            raise ValidationError({"employee_code": "Обязательное поле."})
+        try:
+            employee = Employee.objects.get(employee_code=employee_code)
+        except Employee.DoesNotExist:
+            raise NotFound("Сотрудник не найден")
+
+        task.assigned_to = employee
+        task.save()
+
+        TaskAssignmentLog.objects.create(task=task, employee=employee, note="Ручное назначение через API")
+
+        return Response({"detail": "Сотрудник назначен на задачу."}, status=200)
+
+    @action(detail=True, methods=["post"], url_path="assign_auto")
+    def assign_automatically(self, request, pk=None):
+        """Назначить задачу автоматически через ИИ-эвристику"""
+        task = self.get_object()
+        employee = assign_task_to_best_employee(task)
+
+        if not employee:
+            return Response(
+                {"detail": "Нет подходящего сотрудника для назначения."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        return Response(
+            {"detail": f"Задача назначена сотруднику {employee.employee_code}"},
+            status=200
+        )
+
+    @action(detail=True, methods=["get"], url_path="history")
+    def assignment_history(self, request, pk=None):
+        """Получить историю назначений задачи"""
+        task = self.get_object()
+        logs = task.assignment_history.all().order_by('-timestamp')
+        serializer = TaskAssignmentLogSerializer(logs, many=True)
+        return Response(serializer.data)
+    
+    @action(detail=True, methods=["post"], url_path="complete")
+    def complete(self, request, pk=None):
+        """Завершить задачу и освободить сотрудника"""
+        task = self.get_object()
+
+        if complete_task(task):
+            return Response({"detail": "Задача завершена."})
+        return Response({"detail": "Задачу нельзя завершить."}, status=400)
+
+
+# === view для грузов и их перемещений ===
+from core.models import Cargo, CargoEvent, StorageLocation, Employee
+from core.serializers import (
+    CargoSerializer,
+    CargoCreateSerializer,
+    CargoEventSerializer,
+    StorageLocationSerializer
+)
+from rest_framework import viewsets, status
+from rest_framework.decorators import action
+from rest_framework.response import Response
+from rest_framework.exceptions import NotFound, ValidationError
+from django.utils.timezone import now
+
+
+class CargoViewSet(viewsets.ModelViewSet):
+    queryset = Cargo.objects.all()
+    serializer_class = CargoSerializer
+
+    def get_serializer_class(self):
+        if self.action == "create":
+            return CargoCreateSerializer
+        return CargoSerializer
+
+    @action(detail=True, methods=["post"], url_path="store")
+    def store(self, request, pk=None):
+        """Разместить груз в свободной ячейке"""
+        cargo = self.get_object()
+        loc_id = request.data.get("location_id")
+
+        if not loc_id:
+            raise ValidationError({"location_id": "Обязательное поле."})
+
+        try:
+            location = StorageLocation.objects.get(id=loc_id)
+        except StorageLocation.DoesNotExist:
+            raise NotFound("Ячейка не найдена.")
+
+        if location.is_occupied:
+            return Response({"detail": "Эта ячейка уже занята."}, status=400)
+
+        # Обновляем статус новой ячейки
+        location.is_occupied = True
+        location.save()
+
+        # Освобождаем предыдущую ячейку, если есть
+        if cargo.location and cargo.location != location:
+            old_location = cargo.location
+            old_location.is_occupied = False
+            old_location.save()
+
+        # Обновляем груз
+        cargo.location = location
+        cargo.current_status = "stored"
+        cargo.save()
+
+        CargoEvent.objects.create(
+            cargo=cargo,
+            event_type="stored",
+            location=str(location),
+            triggered_by=None,
+            note="Груз размещён вручную"
+        )
+
+        return Response({"detail": "Груз успешно размещён."})
+
+    @action(detail=True, methods=["post"], url_path="move")
+    def move(self, request, pk=None):
+        """Переместить груз в другую ячейку"""
+        cargo = self.get_object()
+        loc_id = request.data.get("location_id")
+
+        if not loc_id:
+            raise ValidationError({"location_id": "Обязательное поле."})
+
+        try:
+            new_location = StorageLocation.objects.get(id=loc_id)
+        except StorageLocation.DoesNotExist:
+            raise NotFound("Ячейка не найдена.")
+
+        if new_location.is_occupied:
+            return Response({"detail": "Ячейка уже занята другим грузом."}, status=400)
+
+        # Обновляем статус новой ячейки
+        new_location.is_occupied = True
+        new_location.save()
+
+        # Освобождаем старую ячейку
+        if cargo.location and cargo.location != new_location:
+            old_location = cargo.location
+            old_location.is_occupied = False
+            old_location.save()
+
+        cargo.location = new_location
+        cargo.current_status = "stored"
+        cargo.save()
+
+        CargoEvent.objects.create(
+            cargo=cargo,
+            event_type="moved",
+            location=str(new_location),
+            triggered_by=None,
+            note="Груз перемещён вручную"
+        )
+
+        return Response({"detail": "Груз успешно перемещён."})
+
+    @action(detail=True, methods=["post"], url_path="remove_from_location")
+    def remove_from_location(self, request, pk=None):
+        """Снять груз с хранения и освободить ячейку"""
+        cargo = self.get_object()
+
+        if not cargo.location:
+            return Response({"detail": "Груз не размещён."}, status=400)
+
+        old_location = cargo.location
+        old_location.is_occupied = False
+        old_location.save()
+
+        cargo.location = None
+        cargo.current_status = "in_stock"
+        cargo.save()
+
+        CargoEvent.objects.create(
+            cargo=cargo,
+            event_type="removed",
+            location=str(old_location),
+            triggered_by=None,
+            note="Груз снят с хранения вручную"
+        )
+
+        return Response({"detail": "Груз снят с хранения."})
+
+    @action(detail=True, methods=["get"], url_path="events")
+    def events(self, request, pk=None):
+        """История всех операций с грузом"""
+        cargo = self.get_object()
+        events = cargo.events.all().order_by('-timestamp')
+        serializer = CargoEventSerializer(events, many=True)
+        return Response(serializer.data)
+
+
+class StorageLocationViewSet(viewsets.ModelViewSet):
+    queryset = StorageLocation.objects.all().order_by('zone', 'aisle', 'rack', 'shelf', 'bin')
+    serializer_class = StorageLocationSerializer

@@ -94,6 +94,7 @@ class CargoEventAdmin(admin.ModelAdmin):
 
 @admin.register(StorageLocation)
 class StorageLocationAdmin(admin.ModelAdmin):
-    list_display = ("zone", "aisle", "rack", "shelf", "bin")
+    list_display = ("zone", "aisle", "rack", "shelf", "bin", "is_occupied")
+    list_filter = ("is_occupied",)
     search_fields = ("zone", "aisle", "rack", "shelf", "bin")
     ordering = ("zone", "aisle", "rack", "shelf", "bin")
