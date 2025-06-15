@@ -3,6 +3,7 @@
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from core.services.shifts import assign_tasks_from_pool_to_shift
 
 from core.models import Shift
 from core.serializers import (
@@ -39,11 +40,47 @@ class ShiftViewSet(viewsets.ReadOnlyModelViewSet):
             return Response({"detail": "Нет активной смены."}, status=404)
         return Response(ShiftSerializer(shift).data)
 
-    @action(detail=True, methods=['post'], url_path='close')
+    @action(detail=True, methods=["post"], url_path="close")
     def close(self, request, pk=None):
-        shift = self.get_object()
-        close_shift(shift)
-        return Response({"detail": "Смена закрыта."})
+        """Закрытие смены + возврат задач в пул"""
+        try:
+            shift = self.get_object()
+        except Shift.DoesNotExist:
+            raise NotFound("Смена не найдена.")
+
+        if not shift.is_active:
+            return Response({"detail": "Смена уже закрыта."}, status=400)
+
+        shift.is_active = False
+        shift.save()
+
+        # Получаем/создаём пул задач
+        task_pool, _ = TaskPool.objects.get_or_create(name="Общий пул")
+
+        # Находим незавершённые задачи
+        unfinished_tasks = shift.tasks.filter(status__in=["pending", "in_progress"])
+
+        returned_count = 0
+        for task in unfinished_tasks:
+            previous_employee = task.assigned_to
+
+            task.assigned_to = None
+            task.status = "pending"
+            task.shift = None
+            task.task_pool = task_pool
+            task.save()
+
+            TaskAssignmentLog.objects.create(
+                task=task,
+                employee=previous_employee,
+                note="Снята и возвращена в пул при завершении смены"
+            )
+            returned_count += 1
+
+        return Response(
+            {"detail": f"Смена закрыта. В пул задач возвращено: {returned_count}."},
+            status=200
+        )
 
     @action(detail=True, methods=['post'], url_path='remove_employee')
     def remove_employee(self, request, pk=None):
@@ -59,6 +96,25 @@ class ShiftViewSet(viewsets.ReadOnlyModelViewSet):
         if success:
             return Response({"detail": "Сотрудник удалён из смены."})
         return Response({"detail": "Нельзя удалить сотрудника (смена уже началась или код не найден)."}, status=400)
+    
+    @action(detail=True, methods=["post"], url_path="start")
+    def start_shift(self, request, pk=None):
+        """Активировать смену и назначить задачи из пула"""
+        shift = self.get_object()
+
+        if shift.is_active:
+            return Response({"detail": "Смена уже активна."}, status=400)
+
+        shift.is_active = True
+        shift.save()
+
+        # Назначаем задачи из пула при запуске смены
+        assigned = assign_tasks_from_pool_to_shift(shift)
+
+        return Response(
+            {"detail": f"Смена запущена. Назначено из пула: {assigned} задач."},
+            status=200
+        )
 
 
 from rest_framework import viewsets, status
@@ -137,16 +193,26 @@ class TaskViewSet(viewsets.ModelViewSet):
         if complete_task(task):
             return Response({"detail": "Задача завершена."})
         return Response({"detail": "Задачу нельзя завершить."}, status=400)
+    
+
+from core.models import TaskPool
+from core.serializers import TaskPoolSerializer
+
+
+class TaskPoolViewSet(viewsets.ModelViewSet):
+    queryset = TaskPool.objects.all()
+    serializer_class = TaskPoolSerializer
 
 
 # === view для грузов и их перемещений ===
-from core.models import Cargo, CargoEvent, StorageLocation, Employee
+from core.models import Cargo, Employee
+# CargoEvent, StorageLocation
 from core.serializers import (
     CargoSerializer,
     CargoCreateSerializer,
-    CargoEventSerializer,
-    StorageLocationSerializer
 )
+    # CargoEventSerializer,
+    # StorageLocationSerializer
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -163,124 +229,124 @@ class CargoViewSet(viewsets.ModelViewSet):
             return CargoCreateSerializer
         return CargoSerializer
 
-    @action(detail=True, methods=["post"], url_path="store")
-    def store(self, request, pk=None):
-        """Разместить груз в свободной ячейке"""
-        cargo = self.get_object()
-        loc_id = request.data.get("location_id")
+    # @action(detail=True, methods=["post"], url_path="store")
+    # def store(self, request, pk=None):
+    #     """Разместить груз в свободной ячейке"""
+    #     cargo = self.get_object()
+    #     loc_id = request.data.get("location_id")
 
-        if not loc_id:
-            raise ValidationError({"location_id": "Обязательное поле."})
+    #     if not loc_id:
+    #         raise ValidationError({"location_id": "Обязательное поле."})
 
-        try:
-            location = StorageLocation.objects.get(id=loc_id)
-        except StorageLocation.DoesNotExist:
-            raise NotFound("Ячейка не найдена.")
+    #     try:
+    #         location = StorageLocation.objects.get(id=loc_id)
+    #     except StorageLocation.DoesNotExist:
+    #         raise NotFound("Ячейка не найдена.")
 
-        if location.is_occupied:
-            return Response({"detail": "Эта ячейка уже занята."}, status=400)
+    #     if location.is_occupied:
+    #         return Response({"detail": "Эта ячейка уже занята."}, status=400)
 
-        # Обновляем статус новой ячейки
-        location.is_occupied = True
-        location.save()
+    #     # Обновляем статус новой ячейки
+    #     location.is_occupied = True
+    #     location.save()
 
-        # Освобождаем предыдущую ячейку, если есть
-        if cargo.location and cargo.location != location:
-            old_location = cargo.location
-            old_location.is_occupied = False
-            old_location.save()
+    #     # Освобождаем предыдущую ячейку, если есть
+    #     if cargo.location and cargo.location != location:
+    #         old_location = cargo.location
+    #         old_location.is_occupied = False
+    #         old_location.save()
 
-        # Обновляем груз
-        cargo.location = location
-        cargo.current_status = "stored"
-        cargo.save()
+    #     # Обновляем груз
+    #     cargo.location = location
+    #     cargo.current_status = "stored"
+    #     cargo.save()
 
-        CargoEvent.objects.create(
-            cargo=cargo,
-            event_type="stored",
-            location=str(location),
-            triggered_by=None,
-            note="Груз размещён вручную"
-        )
+    #     CargoEvent.objects.create(
+    #         cargo=cargo,
+    #         event_type="stored",
+    #         location=str(location),
+    #         triggered_by=None,
+    #         note="Груз размещён вручную"
+    #     )
 
-        return Response({"detail": "Груз успешно размещён."})
+    #     return Response({"detail": "Груз успешно размещён."})
 
-    @action(detail=True, methods=["post"], url_path="move")
-    def move(self, request, pk=None):
-        """Переместить груз в другую ячейку"""
-        cargo = self.get_object()
-        loc_id = request.data.get("location_id")
+    # @action(detail=True, methods=["post"], url_path="move")
+    # def move(self, request, pk=None):
+    #     """Переместить груз в другую ячейку"""
+    #     cargo = self.get_object()
+    #     loc_id = request.data.get("location_id")
 
-        if not loc_id:
-            raise ValidationError({"location_id": "Обязательное поле."})
+    #     if not loc_id:
+    #         raise ValidationError({"location_id": "Обязательное поле."})
 
-        try:
-            new_location = StorageLocation.objects.get(id=loc_id)
-        except StorageLocation.DoesNotExist:
-            raise NotFound("Ячейка не найдена.")
+    #     try:
+    #         new_location = StorageLocation.objects.get(id=loc_id)
+    #     except StorageLocation.DoesNotExist:
+    #         raise NotFound("Ячейка не найдена.")
 
-        if new_location.is_occupied:
-            return Response({"detail": "Ячейка уже занята другим грузом."}, status=400)
+    #     if new_location.is_occupied:
+    #         return Response({"detail": "Ячейка уже занята другим грузом."}, status=400)
 
-        # Обновляем статус новой ячейки
-        new_location.is_occupied = True
-        new_location.save()
+    #     # Обновляем статус новой ячейки
+    #     new_location.is_occupied = True
+    #     new_location.save()
 
-        # Освобождаем старую ячейку
-        if cargo.location and cargo.location != new_location:
-            old_location = cargo.location
-            old_location.is_occupied = False
-            old_location.save()
+    #     # Освобождаем старую ячейку
+    #     if cargo.location and cargo.location != new_location:
+    #         old_location = cargo.location
+    #         old_location.is_occupied = False
+    #         old_location.save()
 
-        cargo.location = new_location
-        cargo.current_status = "stored"
-        cargo.save()
+    #     cargo.location = new_location
+    #     cargo.current_status = "stored"
+    #     cargo.save()
 
-        CargoEvent.objects.create(
-            cargo=cargo,
-            event_type="moved",
-            location=str(new_location),
-            triggered_by=None,
-            note="Груз перемещён вручную"
-        )
+    #     CargoEvent.objects.create(
+    #         cargo=cargo,
+    #         event_type="moved",
+    #         location=str(new_location),
+    #         triggered_by=None,
+    #         note="Груз перемещён вручную"
+    #     )
 
-        return Response({"detail": "Груз успешно перемещён."})
+    #     return Response({"detail": "Груз успешно перемещён."})
 
-    @action(detail=True, methods=["post"], url_path="remove_from_location")
-    def remove_from_location(self, request, pk=None):
-        """Снять груз с хранения и освободить ячейку"""
-        cargo = self.get_object()
+#     @action(detail=True, methods=["post"], url_path="remove_from_location")
+#     def remove_from_location(self, request, pk=None):
+#         """Снять груз с хранения и освободить ячейку"""
+#         cargo = self.get_object()
 
-        if not cargo.location:
-            return Response({"detail": "Груз не размещён."}, status=400)
+#         if not cargo.location:
+#             return Response({"detail": "Груз не размещён."}, status=400)
 
-        old_location = cargo.location
-        old_location.is_occupied = False
-        old_location.save()
+#         old_location = cargo.location
+#         old_location.is_occupied = False
+#         old_location.save()
 
-        cargo.location = None
-        cargo.current_status = "in_stock"
-        cargo.save()
+#         cargo.location = None
+#         cargo.current_status = "in_stock"
+#         cargo.save()
 
-        CargoEvent.objects.create(
-            cargo=cargo,
-            event_type="removed",
-            location=str(old_location),
-            triggered_by=None,
-            note="Груз снят с хранения вручную"
-        )
+#         CargoEvent.objects.create(
+#             cargo=cargo,
+#             event_type="removed",
+#             location=str(old_location),
+#             triggered_by=None,
+#             note="Груз снят с хранения вручную"
+#         )
 
-        return Response({"detail": "Груз снят с хранения."})
+#         return Response({"detail": "Груз снят с хранения."})
 
-    @action(detail=True, methods=["get"], url_path="events")
-    def events(self, request, pk=None):
-        """История всех операций с грузом"""
-        cargo = self.get_object()
-        events = cargo.events.all().order_by('-timestamp')
-        serializer = CargoEventSerializer(events, many=True)
-        return Response(serializer.data)
+#     @action(detail=True, methods=["get"], url_path="events")
+#     def events(self, request, pk=None):
+#         """История всех операций с грузом"""
+#         cargo = self.get_object()
+#         events = cargo.events.all().order_by('-timestamp')
+#         serializer = CargoEventSerializer(events, many=True)
+#         return Response(serializer.data)
 
 
-class StorageLocationViewSet(viewsets.ModelViewSet):
-    queryset = StorageLocation.objects.all().order_by('zone', 'aisle', 'rack', 'shelf', 'bin')
-    serializer_class = StorageLocationSerializer
+# class StorageLocationViewSet(viewsets.ModelViewSet):
+#     queryset = StorageLocation.objects.all().order_by('zone', 'aisle', 'rack', 'shelf', 'bin')
+#     serializer_class = StorageLocationSerializer

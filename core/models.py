@@ -32,7 +32,7 @@ class Shift(models.Model):
     start_time = models.TimeField(null=True, blank=True)
     end_time = models.TimeField(null=True, blank=True)
     employees = models.ManyToManyField(Employee, related_name='shifts')
-    is_active = models.BooleanField(default=True)
+    is_active = models.BooleanField(default=False)
 
     def __str__(self):
         return f"Смена {self.date}"
@@ -54,21 +54,21 @@ class EmployeeShiftStats(models.Model):
 
 
 # === Ячейки хранения ===
-class StorageLocation(models.Model):
-    zone = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(5)])
-    aisle = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(5)])
-    rack = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(5)])
-    shelf = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(5)])
-    bin = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(5)])
-    is_occupied = models.BooleanField(default=False)
+# class StorageLocation(models.Model):
+#     zone = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(5)])
+#     aisle = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(5)])
+#     rack = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(5)])
+#     shelf = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(5)])
+#     bin = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(5)])
+#     is_occupied = models.BooleanField(default=False)
 
-    class Meta:
-        unique_together = ('zone', 'aisle', 'rack', 'shelf', 'bin')
-        verbose_name = "Ячейка хранения"
-        verbose_name_plural = "Ячейки хранения"
+#     class Meta:
+#         unique_together = ('zone', 'aisle', 'rack', 'shelf', 'bin')
+#         verbose_name = "Ячейка хранения"
+#         verbose_name_plural = "Ячейки хранения"
 
-    def __str__(self):
-        return f"З{self.zone}-П{self.aisle}-С{self.rack}-Пл{self.shelf}-Я{self.bin}"
+#     def __str__(self):
+#         return f"З{self.zone}-П{self.aisle}-С{self.rack}-Пл{self.shelf}-Я{self.bin}"
 
 
 # === Грузы ===
@@ -110,12 +110,17 @@ class Cargo(models.Model):
         default='created'
     )
 
-    location = models.OneToOneField(
-        StorageLocation,
-        null=True,
+    # location = models.OneToOneField(
+    #     StorageLocation,
+    #     null=True,
+    #     blank=True,
+    #     on_delete=models.SET_NULL,
+    #     related_name='cargo'
+    # )
+    location = models.CharField(
+        max_length=100,
         blank=True,
-        on_delete=models.SET_NULL,
-        related_name='cargo'
+        help_text="Произвольное описание местоположения груза (например, зона A3, полка 5)"
     )
 
     def __str__(self):
@@ -123,34 +128,47 @@ class Cargo(models.Model):
 
 
 # === История работы с грузом ===
-class CargoEvent(models.Model):
-    cargo = models.ForeignKey(Cargo, on_delete=models.CASCADE, related_name='events')
-    event_type = models.CharField(
-        max_length=30,
-        choices=[
-            ('arrived', 'Поступление'),
-            ('stored', 'Размещение на хранение'),
-            ('moved', 'Перемещение внутри склада'),
-            ('processing', 'Обработка/упаковка'),
-            ('dispatched', 'Отгрузка'),
-            ('inspection', 'Контроль/проверка'),
-            ('manual_note', 'Ручная отметка'),
-        ]
-    )
-    timestamp = models.DateTimeField(auto_now_add=True)
-    location = models.CharField(max_length=100, blank=True)
-    triggered_by = models.ForeignKey(Employee, null=True, blank=True, on_delete=models.SET_NULL, related_name='cargo_events')
-    note = models.TextField(blank=True)
+# class CargoEvent(models.Model):
+#     cargo = models.ForeignKey(Cargo, on_delete=models.CASCADE, related_name='events')
+#     event_type = models.CharField(
+#         max_length=30,
+#         choices=[
+#             ('arrived', 'Поступление'),
+#             ('stored', 'Размещение на хранение'),
+#             ('moved', 'Перемещение внутри склада'),
+#             ('processing', 'Обработка/упаковка'),
+#             ('dispatched', 'Отгрузка'),
+#             ('inspection', 'Контроль/проверка'),
+#             ('manual_note', 'Ручная отметка'),
+#         ]
+#     )
+#     timestamp = models.DateTimeField(auto_now_add=True)
+#     location = models.CharField(max_length=100, blank=True)
+#     triggered_by = models.ForeignKey(Employee, null=True, blank=True, on_delete=models.SET_NULL, related_name='cargo_events')
+#     note = models.TextField(blank=True)
+
+#     def __str__(self):
+#         return f"{self.cargo} — {self.get_event_type_display()} @ {self.timestamp}"
+
+
+# === Пул для задач ===
+class TaskPool(models.Model):
+    name = models.CharField(max_length=100, unique=True, default="Общий пул")
 
     def __str__(self):
-        return f"{self.cargo} — {self.get_event_type_display()} @ {self.timestamp}"
+        return self.name
 
 
 # === Задачи ===
 class Task(models.Model):
     description = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)
-    shift = models.ForeignKey(Shift, on_delete=models.CASCADE)
+    shift = models.ForeignKey(
+        Shift, null=True, blank=True, on_delete=models.SET_NULL, related_name="tasks"
+    )
+    task_pool = models.ForeignKey(
+        TaskPool, null=True, blank=True, on_delete=models.SET_NULL, related_name="tasks"
+    )
     cargo = models.ForeignKey(Cargo, null=True, blank=True, on_delete=models.SET_NULL)
 
     required_qualifications = models.ManyToManyField(Qualification, blank=True)
@@ -183,4 +201,5 @@ class TaskAssignmentLog(models.Model):
 
     def __str__(self):
         return f"{self.task} → {self.employee} @ {self.timestamp}"
+
 

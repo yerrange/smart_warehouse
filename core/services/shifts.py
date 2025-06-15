@@ -1,8 +1,9 @@
 # services/shifts.py
 from datetime import date, datetime
-from core.models import Shift, Employee, EmployeeShiftStats
+from core.models import Shift, Employee, EmployeeShiftStats, TaskPool, TaskAssignmentLog
 from django.db import transaction
 from django.utils.timezone import now
+from core.services.tasks import assign_task_to_best_employee
 
 def create_shift(shift_date: date) -> Shift:
     shift, created = Shift.objects.get_or_create(date=shift_date)
@@ -61,3 +62,35 @@ def remove_employee_from_shift(shift: Shift, employee_code: str) -> bool:
     EmployeeShiftStats.objects.filter(employee=employee, shift=shift).delete()
 
     return True
+
+
+def assign_tasks_from_pool_to_shift(shift):
+    pool = TaskPool.objects.get(name="Общий пул")
+    tasks = pool.tasks.filter(status="pending")
+
+    assigned_count = 0
+
+    for task in tasks:
+        employee = assign_task_to_best_employee(task, shift=shift)
+        if employee:
+            task.shift = shift
+            task.task_pool = None
+            task.status = "in_progress"
+            task.assigned_to = employee
+            task.save()
+
+            TaskAssignmentLog.objects.create(
+                task=task,
+                employee=employee,
+                note="Назначено из пула при старте смены"
+            )
+
+            # обновляем статусы
+            stats = EmployeeShiftStats.objects.get(shift=shift, employee=employee)
+            stats.task_count += 1
+            stats.is_busy = True
+            stats.save()
+
+            assigned_count += 1
+
+    return assigned_count

@@ -5,8 +5,7 @@ from core.models import (
     TaskAssignmentLog,
     Qualification,
     Cargo,
-    StorageLocation,
-    CargoEvent
+    TaskPool
 )
 from rest_framework import serializers
 
@@ -139,31 +138,37 @@ class TaskAssignmentLogSerializer(serializers.ModelSerializer):
         fields = ['id', 'task', 'employee', 'timestamp', 'note']
 
 
-# === Сериализаторы для блока "Грузы и их перемещение" ===
-from core.models import Cargo, StorageLocation, CargoEvent
-
-
-class StorageLocationSerializer(serializers.ModelSerializer):
+class TaskPoolSerializer(serializers.ModelSerializer):
     class Meta:
-        model = StorageLocation
-        fields = ['id', 'zone', 'aisle', 'rack', 'shelf', 'bin']
+        model = TaskPool
+        fields = ['id', 'name']
 
-    def validate(self, data):
-        if StorageLocation.objects.filter(
-            zone=data['zone'],
-            aisle=data['aisle'],
-            rack=data['rack'],
-            shelf=data['shelf'],
-            bin=data['bin']
-        ).exists():
-            raise serializers.ValidationError(
-                "Ячейка с таким расположением уже существует."
-            )
-        return data
+
+# === Сериализаторы для блока "Грузы и их перемещение" ===
+# from core.models import Cargo, StorageLocation, CargoEvent
+
+
+# class StorageLocationSerializer(serializers.ModelSerializer):
+#     class Meta:
+#         model = StorageLocation
+#         fields = ['id', 'zone', 'aisle', 'rack', 'shelf', 'bin']
+
+#     def validate(self, data):
+#         if StorageLocation.objects.filter(
+#             zone=data['zone'],
+#             aisle=data['aisle'],
+#             rack=data['rack'],
+#             shelf=data['shelf'],
+#             bin=data['bin']
+#         ).exists():
+#             raise serializers.ValidationError(
+#                 "Ячейка с таким расположением уже существует."
+#             )
+#         return data
 
 
 class CargoSerializer(serializers.ModelSerializer):
-    location = StorageLocationSerializer(read_only=True)
+    # location = StorageLocationSerializer(read_only=True)
 
     class Meta:
         model = Cargo
@@ -184,7 +189,7 @@ class CargoCreateSerializer(serializers.ModelSerializer):
         ]
 
 
-class CargoEventSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = CargoEvent
-        fields = ['id', 'event_type', 'timestamp', 'location', 'note']
+# class CargoEventSerializer(serializers.ModelSerializer):
+#     class Meta:
+#         model = CargoEvent
+#         fields = ['id', 'event_type', 'timestamp', 'location', 'note']

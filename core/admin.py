@@ -11,8 +11,7 @@ from core.models import (
     Task,
     TaskAssignmentLog,
     Cargo,
-    CargoEvent,
-    StorageLocation
+    TaskPool
 )
 
 
@@ -49,7 +48,7 @@ class QualificationAdmin(admin.ModelAdmin):
 
 @admin.register(Shift)
 class ShiftAdmin(admin.ModelAdmin):
-    list_display = ("date", "start_time", "end_time", "is_active")
+    list_display = ("id", "date", "start_time", "end_time", "is_active")
     list_filter = ("is_active", "date")
     filter_horizontal = ("employees",)
 
@@ -82,19 +81,25 @@ class CargoAdmin(admin.ModelAdmin):
     list_display = ("cargo_code", "name", "category", "current_status", "location")
     list_filter = ("category", "current_status", "is_dangerous", "requires_cold_storage", "fragile")
     search_fields = ("cargo_code", "name")
-    autocomplete_fields = ("location",)
+    # autocomplete_fields = ("location",)
 
 
-@admin.register(CargoEvent)
-class CargoEventAdmin(admin.ModelAdmin):
-    list_display = ("cargo", "event_type", "timestamp", "triggered_by")
-    list_filter = ("event_type", "timestamp")
-    search_fields = ("cargo__name", "cargo__cargo_code")
+# @admin.register(CargoEvent)
+# class CargoEventAdmin(admin.ModelAdmin):
+#     list_display = ("cargo", "event_type", "timestamp", "triggered_by")
+#     list_filter = ("event_type", "timestamp")
+#     search_fields = ("cargo__name", "cargo__cargo_code")
 
 
-@admin.register(StorageLocation)
-class StorageLocationAdmin(admin.ModelAdmin):
-    list_display = ("zone", "aisle", "rack", "shelf", "bin", "is_occupied")
-    list_filter = ("is_occupied",)
-    search_fields = ("zone", "aisle", "rack", "shelf", "bin")
-    ordering = ("zone", "aisle", "rack", "shelf", "bin")
+# @admin.register(StorageLocation)
+# class StorageLocationAdmin(admin.ModelAdmin):
+#     list_display = ("zone", "aisle", "rack", "shelf", "bin", "is_occupied")
+#     list_filter = ("is_occupied",)
+#     search_fields = ("zone", "aisle", "rack", "shelf", "bin")
+#     ordering = ("zone", "aisle", "rack", "shelf", "bin")
+
+
+@admin.register(TaskPool)
+class TaskPoolAdmin(admin.ModelAdmin):
+    list_display = ("name",)
+    search_fields = ("name",)
