@@ -77,6 +77,20 @@ class ShiftViewSet(viewsets.ReadOnlyModelViewSet):
             )
             returned_count += 1
 
+
+            from asgiref.sync import async_to_sync
+            from channels.layers import get_channel_layer
+
+
+            channel_layer = get_channel_layer()
+            async_to_sync(channel_layer.group_send)(
+                "task_updates",
+                {
+                    "type": "shift_closed",
+                    "message": {"reason": "смена завершена"}
+                }
+            )
+
         from core.models import EmployeeShiftStats
         EmployeeShiftStats.objects.filter(shift=shift).update(is_busy=False)
 
@@ -138,6 +152,7 @@ from core.services.tasks import assign_task_to_best_employee, complete_task
 class TaskViewSet(viewsets.ModelViewSet):
     queryset = Task.objects.all().order_by('-created_at')
     serializer_class = TaskSerializer
+    filterset_fields = ['status']
 
     def get_serializer_class(self):
         if self.action == 'create':

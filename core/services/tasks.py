@@ -1,5 +1,6 @@
 from core.models import Task, EmployeeShiftStats, TaskAssignmentLog, Shift
 from django.db import transaction
+from core.serializers import TaskSerializer
 
 
 def employee_has_all_qualifications(employee, task):
@@ -62,12 +63,7 @@ def assign_task_to_best_employee(task: Task, shift: Shift):
         "task_updates",
         {
             "type": "task_assigned",
-            "message": {
-                "task_id": task.id,
-                "description": task.description,
-                "assigned_to": employee.employee_code,
-                "status": task.status,
-            }
+            "message": TaskSerializer(task).data
         }
     )
 
@@ -93,4 +89,21 @@ def complete_task(task: Task):
     except EmployeeShiftStats.DoesNotExist:
         pass  # можно логировать
 
+
+    from asgiref.sync import async_to_sync
+    from channels.layers import get_channel_layer    
+    # 🔔 Отправка события завершения
+    channel_layer = get_channel_layer()
+    async_to_sync(channel_layer.group_send)(
+        "task_updates",
+        {
+            "type": "task_completed",
+            "message": {
+                "id": task.id,
+                "reason": "завершено",
+            },
+        },
+    )
+
+    print(f"[COMPLETE] Задача '{task.description}' завершена.")
     return True

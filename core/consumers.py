@@ -18,3 +18,9 @@ class TaskNotificationConsumer(AsyncWebsocketConsumer):
 
     async def task_returned_to_pool(self, event):
         await self.send(text_data=json.dumps(event["message"]))
+
+    async def task_completed(self, event):
+        await self.send(text_data=json.dumps(event["message"]))
+
+    async def shift_closed(self, event):
+        await self.send(text_data=json.dumps(event["message"]))

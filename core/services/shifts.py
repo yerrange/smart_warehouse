@@ -64,6 +64,9 @@ def remove_employee_from_shift(shift: Shift, employee_code: str) -> bool:
     return True
 
 
+from core.models import TaskPool, EmployeeShiftStats, TaskAssignmentLog
+from core.services.tasks import assign_task_to_best_employee
+
 def assign_tasks_from_pool_to_shift(shift):
     pool = TaskPool.objects.get(name="Общий пул")
     tasks = pool.tasks.filter(status="pending")
@@ -73,23 +76,14 @@ def assign_tasks_from_pool_to_shift(shift):
     for task in tasks:
         employee = assign_task_to_best_employee(task, shift)
         if employee:
-            task.shift = shift
-            task.task_pool = None
-            task.status = "in_progress"
-            task.assigned_to = employee
-            task.save()
+            # Уже всё сделано внутри assign_task_to_best_employee
+            # (назначение, сохранение, group_send, статистика)
 
             TaskAssignmentLog.objects.create(
                 task=task,
                 employee=employee,
                 note="Назначено из пула при старте смены"
             )
-
-            # обновляем статусы
-            stats = EmployeeShiftStats.objects.get(shift=shift, employee=employee)
-            stats.task_count += 1
-            stats.is_busy = True
-            stats.save()
 
             assigned_count += 1
 
