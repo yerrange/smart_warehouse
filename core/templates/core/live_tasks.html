@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Задачи в реальном времени</title>
+  <style>
+    table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+    th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+    th { background: #f0f0f0; }
+    tr.new-task { background-color: #e8f7e4; }
+    tr.assigned-task { background-color: #fff3cd; }
+  </style>
+</head>
+<body>
+  <h1>🔥 Live Задачи</h1>
+  <table id="taskTable">
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Название</th>
+        <th>Статус</th>
+        <th>Сотрудник</th>
+        <th>Источник</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <script>
+    const socket = new WebSocket("ws://" + window.location.host + "/ws/tasks/");
+    const tbody = document.querySelector("#taskTable tbody");
+
+    socket.onopen = () => {
+      console.log("✅ WebSocket соединён");
+    };
+
+    socket.onmessage = function(event) {
+      console.log("📨 Получено сообщение:", event.data);
+
+      let data;
+      try {
+        data = JSON.parse(event.data);
+      } catch (e) {
+        console.error("❌ Не удалось распарсить JSON:", e);
+        return;
+      }
+
+      const row = document.createElement("tr");
+
+      row.innerHTML = `
+        <td>${data.id ?? data.task_id ?? "-"}</td>
+        <td>${data.name ?? data.description ?? "-"}</td>
+        <td>${data.status ?? "-"}</td>
+        <td>${data.employee?.name ?? data.assigned_to ?? "-"}</td>
+        <td>${data.reason ?? "без причины"}</td>
+      `;
+
+      if (data.employee || data.assigned_to) {
+        row.classList.add("assigned-task");
+      } else {
+        row.classList.add("new-task");
+      }
+
+      tbody.prepend(row);
+    };
+
+    socket.onerror = function(error) {
+      console.error("🔌 Ошибка WebSocket:", error);
+    };
+
+    socket.onclose = function(event) {
+      console.warn("🔒 WebSocket закрыт:", event);
+    };
+  </script>
+</body>
+</html>

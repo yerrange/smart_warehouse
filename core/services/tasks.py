@@ -1,4 +1,4 @@
-from core.models import Task, EmployeeShiftStats, TaskAssignmentLog
+from core.models import Task, EmployeeShiftStats, TaskAssignmentLog, Shift
 from django.db import transaction
 
 
@@ -9,11 +9,10 @@ def employee_has_all_qualifications(employee, task):
 
 
 @transaction.atomic
-def assign_task_to_best_employee(task: Task):
+def assign_task_to_best_employee(task: Task, shift: Shift):
     if task.assigned_to or task.status != "pending":
         return None  # уже назначено
 
-    shift = task.shift
     stats = EmployeeShiftStats.objects.filter(shift=shift, is_busy=False)
 
     # фильтруем по квалификациям
@@ -47,6 +46,32 @@ def assign_task_to_best_employee(task: Task):
     selected.task_count += 1
     selected.is_busy = True
     selected.save()
+
+
+    from channels.layers import get_channel_layer
+    from asgiref.sync import async_to_sync
+    channel_layer = get_channel_layer()
+    print("🛰️ Отправка в WebSocket:", {
+        "id": task.id,
+        "description": task.description,
+        "status": task.status,
+        "employee": {"id": employee.id, "name": employee.last_name},
+        "reason": "назначено"
+    })
+    async_to_sync(channel_layer.group_send)(
+        "task_updates",
+        {
+            "type": "task_assigned",
+            "message": {
+                "task_id": task.id,
+                "description": task.description,
+                "assigned_to": employee.employee_code,
+                "status": task.status,
+            }
+        }
+    )
+
+    print(f"[ASSIGN] Задача '{task.description}' назначена сотруднику {employee.first_name} {employee.last_name}.")
 
     return employee
 

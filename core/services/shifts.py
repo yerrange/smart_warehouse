@@ -71,7 +71,7 @@ def assign_tasks_from_pool_to_shift(shift):
     assigned_count = 0
 
     for task in tasks:
-        employee = assign_task_to_best_employee(task, shift=shift)
+        employee = assign_task_to_best_employee(task, shift)
         if employee:
             task.shift = shift
             task.task_pool = None

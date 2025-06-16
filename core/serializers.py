@@ -70,8 +70,16 @@ class TaskSerializer(serializers.ModelSerializer):
     class Meta:
         model = Task
         fields = [
-            'id', 'description', 'status', 'shift', 'created_at',
-            'required_qualifications', 'assigned_to', 'difficulty', 'urgent', 'cargo'
+            'id',
+            'description',
+            'status',
+            'shift',
+            'created_at',
+            'required_qualifications',
+            'assigned_to',
+            'difficulty',
+            'urgent',
+            'cargo',
         ]
 
 
@@ -103,6 +111,8 @@ class TaskCreateSerializer(serializers.ModelSerializer):
         qualification_codes = validated_data.pop('required_qualification_codes', [])
         employee_code = validated_data.pop('assigned_employee_code', None)
         cargo_code = validated_data.pop('cargo_code', None)
+        pool, _ = TaskPool.objects.get_or_create(name="Общий пул")
+        validated_data["task_pool"] = pool
 
         task = Task.objects.create(**validated_data)
 
@@ -125,6 +135,25 @@ class TaskCreateSerializer(serializers.ModelSerializer):
                 task.save()
             except Cargo.DoesNotExist:
                 raise serializers.ValidationError({"cargo_code": "Груз не найден"})
+
+        print(f"[POOL] Задача '{task.name}' добавлена в пул задач.")
+
+
+        from channels.layers import get_channel_layer
+        from asgiref.sync import async_to_sync
+        channel_layer = get_channel_layer()
+        async_to_sync(channel_layer.group_send)(
+            "task_updates",
+            {
+                "type": "task_created",
+                "message": {
+                    "id": task.id,
+                    "name": task.name,
+                    "status": task.status,
+                    "difficulty": task.difficulty,
+                }
+            }
+        )   
 
         return task
 

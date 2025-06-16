@@ -77,6 +77,9 @@ class ShiftViewSet(viewsets.ReadOnlyModelViewSet):
             )
             returned_count += 1
 
+        from core.models import EmployeeShiftStats
+        EmployeeShiftStats.objects.filter(shift=shift).update(is_busy=False)
+
         return Response(
             {"detail": f"Смена закрыта. В пул задач возвращено: {returned_count}."},
             status=200
@@ -164,7 +167,7 @@ class TaskViewSet(viewsets.ModelViewSet):
     def assign_automatically(self, request, pk=None):
         """Назначить задачу автоматически через ИИ-эвристику"""
         task = self.get_object()
-        employee = assign_task_to_best_employee(task)
+        employee = assign_task_to_best_employee(task, task.shift)
 
         if not employee:
             return Response(
@@ -350,3 +353,9 @@ class CargoViewSet(viewsets.ModelViewSet):
 # class StorageLocationViewSet(viewsets.ModelViewSet):
 #     queryset = StorageLocation.objects.all().order_by('zone', 'aisle', 'rack', 'shelf', 'bin')
 #     serializer_class = StorageLocationSerializer
+
+from django.shortcuts import render
+
+
+def live_tasks_view(request):
+    return render(request, "core/live_tasks.html")

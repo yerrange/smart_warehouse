@@ -15,6 +15,17 @@ from core.models import (
 )
 
 
+
+
+
+class TaskInline(admin.TabularInline):
+    model = Task
+    extra = 0
+    fields = ("description", "status", "assigned_to", "shift", "urgent")
+    readonly_fields = ("description", "status", "assigned_to", "shift", "urgent")
+    show_change_link = True
+
+
 # === Кастомная форма для Employee ===
 class EmployeeForm(forms.ModelForm):
     class Meta:
@@ -52,6 +63,17 @@ class ShiftAdmin(admin.ModelAdmin):
     list_filter = ("is_active", "date")
     filter_horizontal = ("employees",)
 
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+        for employee in obj.employees.all():
+            EmployeeShiftStats.objects.get_or_create(employee=employee, shift=obj)
+
+    def save_related(self, request, form, formsets, change):
+        super().save_related(request, form, formsets, change)
+        shift = form.instance
+        for employee in shift.employees.all():
+            EmployeeShiftStats.objects.get_or_create(employee=employee, shift=shift)
+
 
 @admin.register(EmployeeShiftStats)
 class EmployeeShiftStatsAdmin(admin.ModelAdmin):
@@ -62,11 +84,20 @@ class EmployeeShiftStatsAdmin(admin.ModelAdmin):
 
 @admin.register(Task)
 class TaskAdmin(admin.ModelAdmin):
-    list_display = ("id", "description", "status", "shift", "assigned_to", "difficulty", "urgent")
-    list_filter = ("status", "urgent", "shift")
+    list_display = ("id", "description", "status", "shift", "assigned_to", "difficulty", "urgent",)
+    list_filter = ("status", "urgent", "shift", "task_pool")
     search_fields = ("description",)
     raw_id_fields = ("assigned_to", "cargo")
     autocomplete_fields = ("required_qualifications",)
+
+    def get_changeform_initial_data(self, request):
+        initial = super().get_changeform_initial_data(request)
+        try:
+            pool = TaskPool.objects.get(name="Общий пул")
+            initial["task_pool"] = pool.id
+        except TaskPool.DoesNotExist:
+            pass
+        return initial
 
 
 @admin.register(TaskAssignmentLog)
@@ -103,3 +134,4 @@ class CargoAdmin(admin.ModelAdmin):
 class TaskPoolAdmin(admin.ModelAdmin):
     list_display = ("name",)
     search_fields = ("name",)
+    inlines = [TaskInline]
