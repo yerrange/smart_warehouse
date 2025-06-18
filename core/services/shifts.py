@@ -86,5 +86,7 @@ def assign_tasks_from_pool_to_shift(shift):
             )
 
             assigned_count += 1
+            task.shift = shift
+            task.save()
 
     return assigned_count

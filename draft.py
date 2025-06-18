@@ -9,3 +9,5 @@ daphne smart_warehouse.asgi:application
 http://localhost:8000/tasks/live/
 python manage.py runserver 0.0.0.0:8001
 http://localhost:8000/api/docs/
+python manage.py graph_models core --dot -o schema.dot
+dot -Tpng schema.dot -o schema.png

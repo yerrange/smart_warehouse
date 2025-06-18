@@ -41,7 +41,8 @@ INSTALLED_APPS = [
     'core.apps.CoreConfig',
     'rest_framework',
     'drf_spectacular',
-    "channels",
+    'channels',
+    'django_extensions',
 ]
 
 MIDDLEWARE = [

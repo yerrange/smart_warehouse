@@ -11,6 +11,7 @@ from rest_framework import serializers
 
 
 # === Сериализаторы для блока "работники и смены" ===
+
 class EmployeeShortSerializer(serializers.ModelSerializer):
     class Meta:
         model = Employee
@@ -48,12 +49,6 @@ class QualificationShortSerializer(serializers.ModelSerializer):
     class Meta:
         model = Qualification
         fields = ['code', 'name']
-
-
-class EmployeeShortSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Employee
-        fields = ['employee_code', 'first_name', 'last_name']
 
 
 class CargoShortSerializer(serializers.ModelSerializer):
@@ -222,3 +217,10 @@ class CargoCreateSerializer(serializers.ModelSerializer):
 #     class Meta:
 #         model = CargoEvent
 #         fields = ['id', 'event_type', 'timestamp', 'location', 'note']
+
+
+class EmployeeSerializer(serializers.ModelSerializer):
+    qualifications = QualificationShortSerializer(many=True, read_only=True)
+    class Meta:
+        model = Employee
+        fields = ['id', 'employee_code', 'first_name', 'last_name', 'qualifications', 'is_active']

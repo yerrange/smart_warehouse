@@ -34,6 +34,7 @@ def assign_task_to_best_employee(task: Task, shift: Shift):
     # назначаем задачу
     task.assigned_to = employee
     task.status = "in_progress"
+    task.shift = shift
     task.save()
 
     # логируем назначение

@@ -9,7 +9,8 @@ from core.models import Shift
 from core.serializers import (
     ShiftSerializer,
     ShiftCreateSerializer,
-    ShiftEmployeeUpdateSerializer
+    ShiftEmployeeUpdateSerializer,
+    EmployeeSerializer
 )
 from core.services.shifts import (
     create_shift_with_employees,
@@ -370,6 +371,12 @@ class CargoViewSet(viewsets.ModelViewSet):
 #     serializer_class = StorageLocationSerializer
 
 from django.shortcuts import render
+
+
+class EmployeeViewSet(viewsets.ModelViewSet):
+    queryset = Employee.objects.all()
+    serializer_class = EmployeeSerializer
+
 
 
 def live_tasks_view(request):
