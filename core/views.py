@@ -142,7 +142,7 @@ from rest_framework.exceptions import ValidationError, NotFound
 
 from core.models import Task, TaskAssignmentLog, Employee
 from core.serializers import (
-    TaskSerializer,
+    TaskReadSerializer,
     TaskCreateSerializer,
     TaskAssignmentLogSerializer
 )
@@ -152,13 +152,13 @@ from core.services.tasks import assign_task_to_best_employee, complete_task
 # === view для задач ===
 class TaskViewSet(viewsets.ModelViewSet):
     queryset = Task.objects.all().order_by('-created_at')
-    serializer_class = TaskSerializer
+    serializer_class = TaskReadSerializer
     filterset_fields = ['status']
 
     def get_serializer_class(self):
         if self.action == 'create':
             return TaskCreateSerializer
-        return TaskSerializer
+        return TaskReadSerializer
 
     @action(detail=True, methods=["post"], url_path="assign")
     def assign_manually(self, request, pk=None):

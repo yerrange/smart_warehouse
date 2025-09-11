@@ -57,7 +57,7 @@ class CargoShortSerializer(serializers.ModelSerializer):
         fields = ['cargo_code', 'name']
 
 
-class TaskSerializer(serializers.ModelSerializer):
+class TaskReadSerializer(serializers.ModelSerializer):
     required_qualifications = QualificationShortSerializer(many=True, read_only=True)
     assigned_to = EmployeeShortSerializer(read_only=True)
     cargo = CargoShortSerializer(read_only=True)
@@ -66,6 +66,7 @@ class TaskSerializer(serializers.ModelSerializer):
         model = Task
         fields = [
             'id',
+            'name',
             'description',
             'status',
             'shift',
@@ -88,7 +89,7 @@ class TaskCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Task
         fields = [
-            'description', 'shift', 'difficulty', 'urgent',
+            'name', 'description', 'shift', 'difficulty', 'urgent',
             'required_qualification_codes', 'assigned_employee_code', 'cargo_code'
         ]
 

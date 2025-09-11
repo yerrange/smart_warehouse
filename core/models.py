@@ -2,6 +2,8 @@ from django.db import models
 
 from django.db import models
 from django.core.validators import MinValueValidator, MaxValueValidator
+from django.utils.translation import gettext_lazy as _
+from django.db.models import Q, F
 
 
 # === Квалификации сотрудников ===
@@ -161,35 +163,73 @@ class TaskPool(models.Model):
 
 # === Задачи ===
 class Task(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "pending", _("Pending")
+        IN_PROGRESS = "in_progress", _("In progress")
+        PAUSED = "paused", _("Paused")
+        COMPLETED = "completed", _("Completed")
+        CANCELLED = "cancelled", _("Cancelled")
+        FAILED = "failed", _("Failed")
+
+    name = models.CharField(max_length=120)
     description = models.TextField()
-    created_at = models.DateTimeField(auto_now_add=True)
-    shift = models.ForeignKey(
-        Shift, null=True, blank=True, on_delete=models.SET_NULL, related_name="tasks"
-    )
-    task_pool = models.ForeignKey(
-        TaskPool, null=True, blank=True, on_delete=models.SET_NULL, related_name="tasks"
-    )
-    cargo = models.ForeignKey(Cargo, null=True, blank=True, on_delete=models.SET_NULL)
 
-    required_qualifications = models.ManyToManyField(Qualification, blank=True)
-    assigned_to = models.ForeignKey(Employee, null=True, blank=True, on_delete=models.SET_NULL)
-
-    status = models.CharField(
-        max_length=20,
-        choices=[
-            ('pending', 'Ожидает назначения'),
-            ('in_progress', 'Выполняется'),
-            ('completed', 'Завершена'),
-            ('cancelled', 'Отменена')
-        ],
-        default='pending'
-    )
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    priority = models.PositiveSmallIntegerField(default=0, help_text="0..n, выше — важнее")
 
     difficulty = models.PositiveSmallIntegerField(default=1)
-    urgent = models.BooleanField(default=False)
+    estimated_minutes = models.PositiveIntegerField(default=0)
+    actual_minutes = models.PositiveIntegerField(default=0)
+
+    due_at = models.DateTimeField(null=True, blank=True)
+    assigned_at = models.DateTimeField(null=True, blank=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    shift = models.ForeignKey(
+        Shift,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="tasks",
+        db_index=True
+    )
+    task_pool = models.ForeignKey(
+        TaskPool,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="tasks",
+        db_index=True
+    )
+
+    assigned_to = models.ForeignKey(Employee, null=True, blank=True, on_delete=models.SET_NULL)
+    required_qualifications = models.ManyToManyField(Qualification, blank=True)
+
+    cargo = models.ForeignKey(Cargo, null=True, blank=True, on_delete=models.SET_NULL)
+    
+    external_ref = models.CharField(max_length=64, null=True, blank=True)
+    source = models.CharField(max_length=16, choices=[('manual','manual'),('auto','auto')], default='auto')
+
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return f"Задача {self.id} ({self.get_status_display()})"
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['shift', 'status']),
+            models.Index(fields=['status', 'priority', 'due_at']),
+            models.Index(fields=['assigned_to', 'status']),
+        ]
+        constraints = [
+            models.CheckConstraint(check=Q(difficulty__gte=1) & Q(difficulty__lte=5), name='task_difficulty_1_5'),
+            models.CheckConstraint(check=Q(due_at__isnull=True) | Q(due_at__gte=models.F('created_at')), name='task_due_after_created'),
+            models.UniqueConstraint(fields=['assigned_to'], condition=Q(status__in=['in_progress','paused']),
+                                    name='unique_active_task_per_employee'),
+        ]
+        ordering = ('-priority', 'due_at', 'id')
 
 
 # === История назначения задач ===
