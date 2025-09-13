@@ -211,10 +211,19 @@ class Cargo(models.Model):
 
 # === Пул для задач ===
 class TaskPool(models.Model):
-    name = models.CharField(max_length=100, unique=True, default="Общий пул")
+    name = models.CharField(max_length=120)
+    is_active = models.BooleanField(default=True, db_index=True)
+    auto_assign_enabled = models.BooleanField(default=True)
+    default_priority = models.PositiveSmallIntegerField(default=0)
+
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-is_active', 'name', 'id']
 
     def __str__(self):
-        return self.name
+        return f"Пул {self.name} ({'вкл' if self.is_active else 'выкл'})"
 
 
 # === Задачи ===
