@@ -21,8 +21,8 @@ from core.models import (
 class TaskInline(admin.TabularInline):
     model = Task
     extra = 0
-    fields = ("description", "status", "assigned_to", "shift", "urgent")
-    readonly_fields = ("description", "status", "assigned_to", "shift", "urgent")
+    fields = ("description", "status", "assigned_to", "shift", )
+    readonly_fields = ("description", "status", "assigned_to", "shift", )
     show_change_link = True
 
 
@@ -59,9 +59,9 @@ class QualificationAdmin(admin.ModelAdmin):
 
 @admin.register(Shift)
 class ShiftAdmin(admin.ModelAdmin):
-    list_display = ("id", "date", "start_time", "end_time", "is_active")
+    list_display = ("id", "name", "date", "start_time", "end_time", "is_active")
     list_filter = ("is_active", "date")
-    filter_horizontal = ("employees",)
+    # filter_horizontal = ("employees",)
 
     def save_model(self, request, obj, form, change):
         super().save_model(request, obj, form, change)
@@ -84,8 +84,8 @@ class EmployeeShiftStatsAdmin(admin.ModelAdmin):
 
 @admin.register(Task)
 class TaskAdmin(admin.ModelAdmin):
-    list_display = ("id", "description", "status", "shift", "assigned_to", "difficulty", "urgent",)
-    list_filter = ("status", "urgent", "shift", "task_pool")
+    list_display = ("id", "name", "description", "status", "shift", "assigned_to", "difficulty",)
+    list_filter = ("status", "shift", "task_pool")
     search_fields = ("description",)
     raw_id_fields = ("assigned_to", "cargo")
     autocomplete_fields = ("required_qualifications",)

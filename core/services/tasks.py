@@ -1,6 +1,6 @@
 from core.models import Task, EmployeeShiftStats, TaskAssignmentLog, Shift
 from django.db import transaction
-from core.serializers import TaskSerializer
+from core.serializers import TaskReadSerializer
 
 
 def employee_has_all_qualifications(employee, task):

@@ -4,6 +4,7 @@ from django.db import models
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.utils.translation import gettext_lazy as _
 from django.db.models import Q, F
+from django.utils.timezone import now
 
 
 # === Квалификации сотрудников ===
@@ -21,7 +22,7 @@ class Employee(models.Model):
     first_name = models.CharField(max_length=50)
     last_name = models.CharField(max_length=50)
     employee_code = models.CharField(max_length=20, unique=True)
-    qualifications = models.ManyToManyField(Qualification, blank=True)
+    qualifications = models.ManyToManyField('Qualification', blank=True)
     is_active = models.BooleanField(default=True)
 
     def __str__(self):
@@ -30,20 +31,66 @@ class Employee(models.Model):
 
 # === Смены ===
 class Shift(models.Model):
-    date = models.DateField()
-    start_time = models.TimeField(null=True, blank=True)
-    end_time = models.TimeField(null=True, blank=True)
-    employees = models.ManyToManyField(Employee, related_name='shifts')
-    is_active = models.BooleanField(default=False)
+    name = models.CharField(max_length=120, blank=True)          # например: "Дневная смена 12.09"
+    date = models.DateField(db_index=True)
+    is_active = models.BooleanField(default=False, db_index=True)
+
+    start_time = models.DateTimeField(null=True, blank=True)
+    end_time = models.DateTimeField(null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    employees = models.ManyToManyField('Employee', through='EmployeeShiftStats',related_name='shifts')
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['date', 'is_active']),
+            models.Index(fields=['-start_time']),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                check=Q(end_time__isnull=True) | Q(start_time__isnull=False),
+                name='shift_end_requires_start'
+            ),
+            models.CheckConstraint(
+                check=Q(end_time__isnull=True) | Q(end_time__gte=F('start_time')),
+                name='shift_end_after_start'
+            ),
+        ]
+        ordering = ['-date', '-start_time', 'id']
 
     def __str__(self):
-        return f"Смена {self.date}"
+        label = self.name or f"Смена {self.date}"
+        state = "активна" if self.is_active else "закрыта"
+        return f"{label} ({state})"
+
+    # Доменные действия с инвариантами
+    def can_start(self) -> bool:
+        return not self.is_active and self.start_time is None
+
+    def can_close(self) -> bool:
+        return self.is_active
+
+    def start(self) -> None:
+        if not self.can_start():
+            raise ValueError("Нельзя стартовать эту смену (уже активна или была запущена).")
+        self.is_active = True
+        self.start_time = now()
+        self.save(update_fields=['is_active', 'start_time', 'updated_at'])
+
+    def close(self) -> None:
+        if not self.can_close():
+            raise ValueError("Нельзя закрыть неактивную смену.")
+        self.is_active = False
+        self.end_time = now()
+        self.save(update_fields=['is_active', 'end_time', 'updated_at'])
 
 
 # === Динамическая статистика по сменам ===
 class EmployeeShiftStats(models.Model):
-    employee = models.ForeignKey(Employee, on_delete=models.CASCADE, related_name='shift_stats')
-    shift = models.ForeignKey(Shift, on_delete=models.CASCADE, related_name='employee_stats')
+    employee = models.ForeignKey('Employee', on_delete=models.CASCADE, related_name='shift_stats')
+    shift = models.ForeignKey('Shift', on_delete=models.CASCADE, related_name='employee_stats')
     task_count = models.IntegerField(default=0)
     shift_score = models.IntegerField(default=0)
     is_busy = models.BooleanField(default=False)
@@ -187,7 +234,7 @@ class Task(models.Model):
     completed_at = models.DateTimeField(null=True, blank=True)
 
     shift = models.ForeignKey(
-        Shift,
+        'Shift',
         null=True,
         blank=True,
         on_delete=models.SET_NULL,
@@ -195,7 +242,7 @@ class Task(models.Model):
         db_index=True
     )
     task_pool = models.ForeignKey(
-        TaskPool,
+        'TaskPool',
         null=True,
         blank=True,
         on_delete=models.SET_NULL,
@@ -203,10 +250,10 @@ class Task(models.Model):
         db_index=True
     )
 
-    assigned_to = models.ForeignKey(Employee, null=True, blank=True, on_delete=models.SET_NULL)
-    required_qualifications = models.ManyToManyField(Qualification, blank=True)
+    assigned_to = models.ForeignKey('Employee', null=True, blank=True, on_delete=models.SET_NULL)
+    required_qualifications = models.ManyToManyField('Qualification', blank=True)
 
-    cargo = models.ForeignKey(Cargo, null=True, blank=True, on_delete=models.SET_NULL)
+    cargo = models.ForeignKey('Cargo', null=True, blank=True, on_delete=models.SET_NULL)
     
     external_ref = models.CharField(max_length=64, null=True, blank=True)
     source = models.CharField(max_length=16, choices=[('manual','manual'),('auto','auto')], default='auto')
@@ -234,8 +281,8 @@ class Task(models.Model):
 
 # === История назначения задач ===
 class TaskAssignmentLog(models.Model):
-    task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name='assignment_history')
-    employee = models.ForeignKey(Employee, on_delete=models.CASCADE)
+    task = models.ForeignKey('Task', on_delete=models.CASCADE, related_name='assignment_history')
+    employee = models.ForeignKey('Employee', on_delete=models.CASCADE)
     timestamp = models.DateTimeField(auto_now_add=True)
     note = models.TextField(blank=True)
 
