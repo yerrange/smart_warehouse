@@ -89,17 +89,26 @@ class Shift(models.Model):
 
 # === Динамическая статистика по сменам ===
 class EmployeeShiftStats(models.Model):
-    employee = models.ForeignKey('Employee', on_delete=models.CASCADE, related_name='shift_stats')
-    shift = models.ForeignKey('Shift', on_delete=models.CASCADE, related_name='employee_stats')
+    employee = models.ForeignKey('Employee', on_delete=models.CASCADE, related_name='shift_stats', db_index=True)
+    shift = models.ForeignKey('Shift', on_delete=models.CASCADE, related_name='employee_stats', db_index=True)
+    
+    is_busy = models.BooleanField(default=False)
     task_count = models.IntegerField(default=0)
     shift_score = models.IntegerField(default=0)
-    is_busy = models.BooleanField(default=False)
+    last_task_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
-        unique_together = ('employee', 'shift')
+        unique_together = (('employee', 'shift'),)
+        indexes = [
+            models.Index(fields=['shift', 'is_busy']),
+            models.Index(fields=['employee', 'shift']),
+            models.Index(fields=['-shift_score', 'task_count']),
+        ]
+        ordering = ['-shift_score', 'task_count', 'employee_id']
 
     def __str__(self):
-        return f"{self.employee} @ {self.shift}"
+        return f"{self.employee} @ {self.shift}: {'занят' if self.is_busy else 'свободен'}, " \
+               f"задач={self.task_count}, очки={self.shift_score}"
 
 
 # === Ячейки хранения ===
