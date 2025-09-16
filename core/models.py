@@ -1,6 +1,6 @@
 from django.db import models
 
-from django.db import models
+from django.db import models, transaction
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.utils.translation import gettext_lazy as _
 from django.db.models import Q, F
@@ -112,21 +112,43 @@ class EmployeeShiftStats(models.Model):
 
 
 # === Ячейки хранения ===
-# class StorageLocation(models.Model):
-#     zone = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(5)])
-#     aisle = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(5)])
-#     rack = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(5)])
-#     shelf = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(5)])
-#     bin = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(5)])
-#     is_occupied = models.BooleanField(default=False)
+class StorageLocation(models.Model):
+    class LocationType(models.TextChoices):
+        RECEIVING = 'receiving', _('Receiving dock')     # зона приемки
+        STAGING   = 'staging',   _('Staging area')       # буфер
+        RACK      = 'rack',      _('Rack/bin')           # стеллаж/ячейка
+        PICK_FACE = 'pick',      _('Pick face')          # отборочная зона
+        OUTBOUND  = 'outbound',  _('Outbound dock')      # отгрузка
+        QC        = 'qc',        _('Quality control')    # контроль качества
 
-#     class Meta:
-#         unique_together = ('zone', 'aisle', 'rack', 'shelf', 'bin')
-#         verbose_name = "Ячейка хранения"
-#         verbose_name_plural = "Ячейки хранения"
+    code = models.CharField(max_length=64, unique=True)  # Человеческий/сканируемый код ячейки, например Z1-A02-R03-S1-B05
+    location_type = models.CharField(max_length=16, choices=LocationType.choices, default=LocationType.RACK)
 
-#     def __str__(self):
-#         return f"З{self.zone}-П{self.aisle}-С{self.rack}-Пл{self.shelf}-Я{self.bin}"
+    # Примитивная адресация (полезна для генератора ячеек и фильтров)
+    zone  = models.CharField(max_length=16, blank=True)
+    aisle = models.CharField(max_length=16, blank=True)
+    rack  = models.CharField(max_length=16, blank=True)
+    shelf = models.CharField(max_length=16, blank=True)
+    bin   = models.CharField(max_length=16, blank=True)
+
+    # Простая «ёмкость» (не перегружаем формулами) — пока справочно
+    max_weight_kg = models.FloatField(default=0)         # 0 = не ограничено
+    max_volume_m3 = models.FloatField(default=0)
+
+    single_occupancy = models.BooleanField(default=True, help_text="True = ячейка рассчитана на один груз")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['zone','aisle','rack','shelf','bin','code']
+        indexes = [
+            models.Index(fields=['kind']),
+            models.Index(fields=['zone','aisle','rack']),
+        ]
+
+    def __str__(self):
+        return self.code
 
 
 # === Грузы ===
