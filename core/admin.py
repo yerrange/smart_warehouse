@@ -10,23 +10,49 @@ from core.models import (
     EmployeeShiftStats,
     Task,
     TaskAssignmentLog,
+    TaskPool,
     Cargo,
-    TaskPool
+    CargoEvent,
+    StorageLocation,
+    LocationSlot,
 )
 
-
-
+# --- Вспомогательные inline'ы ---
 
 
 class TaskInline(admin.TabularInline):
     model = Task
     extra = 0
-    fields = ("description", "status", "assigned_to", "shift", )
-    readonly_fields = ("description", "status", "assigned_to", "shift", )
+    fields = ("name", "status", "assigned_to", "shift", )
+    readonly_fields = ()
     show_change_link = True
 
 
-# === Кастомная форма для Employee ===
+class LocationSlotInline(admin.TabularInline):
+    model = LocationSlot
+    extra = 0
+    fields = ("index", "code", "size_class")
+    show_change_link = True
+
+
+class CargoEventInline(admin.TabularInline):
+    model = CargoEvent
+    extra = 0
+    fields = ("timestamp", "event_type", "from_slot", "to_slot", "quantity", "employee", "note")
+    readonly_fields = ("timestamp",)
+    show_change_link = False
+
+
+class EmployeeShiftStatsInline(admin.TabularInline):
+    model = EmployeeShiftStats
+    extra = 0
+    autocomplete_fields = ("employee",)
+    fields = ("employee", "is_busy", "task_count", "shift_score", "last_task_at")
+    readonly_fields = ("is_busy", "task_count", "shift_score", "last_task_at")
+
+
+# === Employee ===
+
 class EmployeeForm(forms.ModelForm):
     class Meta:
         model = Employee
@@ -51,28 +77,21 @@ class EmployeeAdmin(admin.ModelAdmin):
     filter_horizontal = ("qualifications",)
 
 
+# === Qualification ===
+
 @admin.register(Qualification)
 class QualificationAdmin(admin.ModelAdmin):
     list_display = ("code", "name")
     search_fields = ("code", "name")
 
 
+# === Shift & EmployeeShiftStats ===
+
 @admin.register(Shift)
 class ShiftAdmin(admin.ModelAdmin):
     list_display = ("id", "name", "date", "start_time", "end_time", "is_active")
     list_filter = ("is_active", "date")
-    # filter_horizontal = ("employees",)
-
-    def save_model(self, request, obj, form, change):
-        super().save_model(request, obj, form, change)
-        for employee in obj.employees.all():
-            EmployeeShiftStats.objects.get_or_create(employee=employee, shift=obj)
-
-    def save_related(self, request, form, formsets, change):
-        super().save_related(request, form, formsets, change)
-        shift = form.instance
-        for employee in shift.employees.all():
-            EmployeeShiftStats.objects.get_or_create(employee=employee, shift=shift)
+    inlines = [EmployeeShiftStatsInline]
 
 
 @admin.register(EmployeeShiftStats)
@@ -82,11 +101,70 @@ class EmployeeShiftStatsAdmin(admin.ModelAdmin):
     search_fields = ("employee__first_name", "employee__last_name", "employee__employee_code")
 
 
+# === StorageLocation & LocationSlot ===
+
+@admin.register(StorageLocation)
+class StorageLocationAdmin(admin.ModelAdmin):
+    list_display = ("code", "location_type", "zone", "aisle", "rack", "shelf", "bin", "slot_count", "slot_size_class")
+    list_filter = ("location_type", "slot_size_class", "zone")
+    search_fields = ("code", "zone", "aisle", "rack", "shelf", "bin")
+    ordering = ("zone", "aisle", "rack", "shelf", "bin", "code")
+    inlines = [LocationSlotInline]
+
+
+@admin.register(LocationSlot)
+class LocationSlotAdmin(admin.ModelAdmin):
+    list_display = ("code", "location", "index", "size_class", "occupied", "cargo_display")
+    list_filter = ("size_class", "location__location_type", "location__zone")
+    search_fields = ("code", "location__code")
+    ordering = ("location__id", "index")
+
+    def occupied(self, obj):
+        from core.models import Cargo
+        return Cargo.objects.filter(current_slot=obj).exists()
+    occupied.boolean = True
+
+    def cargo_display(self, obj):
+        try:
+            return obj.cargo.cargo_code
+        except Cargo.DoesNotExist:
+            return "—"
+    cargo_display.short_description = "Cargo"
+
+
+# === Cargo & CargoEvent ===
+
+@admin.register(Cargo)
+class CargoAdmin(admin.ModelAdmin):
+    list_display = ("cargo_code", "sku", "name", "container_type", "status", "slot_code", "location_code")
+    list_filter = ("status", "container_type")
+    search_fields = ("cargo_code", "sku", "name")
+    raw_id_fields = ("current_slot",)
+    inlines = [CargoEventInline]
+
+    def slot_code(self, obj):
+        return obj.current_slot.code if obj.current_slot_id else "—"
+    slot_code.short_description = "Slot"
+
+    def location_code(self, obj):
+        return obj.current_slot.location.code if obj.current_slot_id else "—"
+    location_code.short_description = "Location"
+
+
+@admin.register(CargoEvent)
+class CargoEventAdmin(admin.ModelAdmin):
+    list_display = ("cargo", "event_type", "timestamp", "from_slot", "to_slot", "quantity", "employee")
+    list_filter = ("event_type", "timestamp")
+    search_fields = ("cargo__cargo_code", "cargo__name")
+
+
+# === Task / TaskAssignmentLog / TaskPool ===
+
 @admin.register(Task)
 class TaskAdmin(admin.ModelAdmin):
-    list_display = ("id", "name", "description", "status", "shift", "assigned_to", "difficulty",)
+    list_display = ("id", "name", "status", "priority", "shift", "assigned_to", "difficulty")
     list_filter = ("status", "shift", "task_pool")
-    search_fields = ("description",)
+    search_fields = ("name", "description")
     raw_id_fields = ("assigned_to", "cargo")
     autocomplete_fields = ("required_qualifications",)
 
@@ -104,34 +182,12 @@ class TaskAdmin(admin.ModelAdmin):
 class TaskAssignmentLogAdmin(admin.ModelAdmin):
     list_display = ("task", "employee", "timestamp")
     list_filter = ("timestamp",)
-    search_fields = ("task__description", "employee__employee_code")
-
-
-@admin.register(Cargo)
-class CargoAdmin(admin.ModelAdmin):
-    list_display = ("cargo_code", "name", "category", "current_status", "location")
-    list_filter = ("category", "current_status", "is_dangerous", "requires_cold_storage", "fragile")
-    search_fields = ("cargo_code", "name")
-    # autocomplete_fields = ("location",)
-
-
-# @admin.register(CargoEvent)
-# class CargoEventAdmin(admin.ModelAdmin):
-#     list_display = ("cargo", "event_type", "timestamp", "triggered_by")
-#     list_filter = ("event_type", "timestamp")
-#     search_fields = ("cargo__name", "cargo__cargo_code")
-
-
-# @admin.register(StorageLocation)
-# class StorageLocationAdmin(admin.ModelAdmin):
-#     list_display = ("zone", "aisle", "rack", "shelf", "bin", "is_occupied")
-#     list_filter = ("is_occupied",)
-#     search_fields = ("zone", "aisle", "rack", "shelf", "bin")
-#     ordering = ("zone", "aisle", "rack", "shelf", "bin")
+    search_fields = ("task__name", "task__description", "employee__employee_code")
 
 
 @admin.register(TaskPool)
 class TaskPoolAdmin(admin.ModelAdmin):
-    list_display = ("name",)
+    list_display = ("name", "is_active", "auto_assign_enabled", "default_priority")
     search_fields = ("name",)
+    list_filter = ("is_active", "auto_assign_enabled")
     inlines = [TaskInline]

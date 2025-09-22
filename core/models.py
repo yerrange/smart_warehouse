@@ -165,11 +165,11 @@ class Cargo(models.Model):
     cargo_code = models.CharField(max_length=50, unique=True)
 
     class Container(models.TextChoices):
-        PALLET = 'pallet', 'Pallet'
-        CRATE = 'crate', 'Crate'
-        DRUM = 'drum', 'Drum'
-        BOX = 'box', 'Box'
-        TOTE = 'tote', 'Tote'
+        PALLET = 'pallet', 'Паллет'
+        CRATE = 'crate', 'Ящик'
+        DRUM = 'drum', 'Бочка'
+        BOX = 'box', 'Коробка'
+        TOTE = 'tote', 'Сумка'
 
     container_type = models.CharField(
         max_length=16,
