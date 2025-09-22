@@ -1,5 +1,3 @@
-from django.db import models
-
 from django.db import models, transaction
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.utils.translation import gettext_lazy as _
@@ -15,8 +13,18 @@ class Employee(models.Model):
     first_name = models.CharField(max_length=50)
     last_name = models.CharField(max_length=50)
     employee_code = models.CharField(max_length=20, unique=True)
+
     qualifications = models.ManyToManyField('Qualification', blank=True)
-    is_active = models.BooleanField(default=True)
+
+    is_active = models.BooleanField(default=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['employee_code']),  # дублирует unique, но ок
+            models.Index(fields=['last_name', 'first_name']),
+        ]
 
     def __str__(self):
         return f"{self.last_name} {self.first_name} ({self.employee_code})"
@@ -27,6 +35,9 @@ class Qualification(models.Model):
     code = models.CharField(max_length=20, unique=True)
     name = models.CharField(max_length=100)
     description = models.TextField(blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return f"{self.name} ({self.code})"
@@ -43,7 +54,7 @@ class Qualification(models.Model):
 
 # === Смены ===
 class Shift(models.Model):
-    name = models.CharField(max_length=120, blank=True)          # например: "Дневная смена 12.09"
+    name = models.CharField(max_length=120, blank=True) # например: "Дневная смена 12.09"
     date = models.DateField(db_index=True)
     is_active = models.BooleanField(default=False, db_index=True)
 
@@ -53,7 +64,11 @@ class Shift(models.Model):
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)
 
-    employees = models.ManyToManyField('Employee', through='EmployeeShiftStats',related_name='shifts')
+    employees = models.ManyToManyField(
+        'Employee',
+        through='EmployeeShiftStats',
+        related_name='shifts'
+    )
 
     class Meta:
         indexes = [
@@ -101,9 +116,19 @@ class Shift(models.Model):
 
 # === Динамическая статистика по сменам ===
 class EmployeeShiftStats(models.Model):
-    employee = models.ForeignKey('Employee', on_delete=models.CASCADE, related_name='shift_stats', db_index=True)
-    shift = models.ForeignKey('Shift', on_delete=models.CASCADE, related_name='employee_stats', db_index=True)
-    
+    employee = models.ForeignKey(
+        'Employee',
+        on_delete=models.CASCADE,
+        related_name='shift_stats',
+        db_index=True
+    )
+    shift = models.ForeignKey(
+        'Shift',
+        on_delete=models.CASCADE,
+        related_name='employee_stats',
+        db_index=True
+    )
+
     is_busy = models.BooleanField(default=False)
     task_count = models.IntegerField(default=0)
     shift_score = models.IntegerField(default=0)
@@ -141,24 +166,33 @@ class Cargo(models.Model):
 
     class Container(models.TextChoices):
         PALLET = 'pallet', 'Pallet'
-        CRATE  = 'crate',  'Crate'
-        DRUM   = 'drum',   'Drum'
-        BOX    = 'box',    'Box'
-        TOTE   = 'tote',   'Tote'
+        CRATE = 'crate', 'Crate'
+        DRUM = 'drum', 'Drum'
+        BOX = 'box', 'Box'
+        TOTE = 'tote', 'Tote'
 
-    container_type = models.CharField(max_length=12, choices=Container.choices, default=Container.PALLET)
+    container_type = models.CharField(
+        max_length=16,
+        choices=Container.choices,
+        default=Container.PALLET
+    )
 
     units = models.PositiveIntegerField(default=1)
     weight_kg = models.FloatField(default=0)
     volume_m3 = models.FloatField(default=0)
 
     class Status(models.TextChoices):
-        ARRIVED    = 'arrived',    'Поступил'
-        STORED     = 'stored',     'Размещён'
+        ARRIVED = 'arrived', 'Поступил'
+        STORED = 'stored', 'Размещён'
         PROCESSING = 'processing', 'Обработка'
         DISPATCHED = 'dispatched', 'Отгружен'
 
-    status = models.CharField(max_length=16, choices=Status.choices, default=Status.ARRIVED, db_index=True)
+    status = models.CharField(
+        max_length=16,
+        choices=Status.choices,
+        default=Status.ARRIVED,
+        db_index=True
+    )
 
     current_slot = models.OneToOneField(
         'LocationSlot', null=True, blank=True, on_delete=models.SET_NULL,
@@ -195,74 +229,104 @@ class Cargo(models.Model):
 # === История работы с грузом ===
 class CargoEvent(models.Model):
     class EventType(models.TextChoices):
-        ARRIVED='arrived','Поступление'
-        STORED='stored','Размещение'
-        MOVED='moved','Перемещение'
-        PICKED='picked','Отбор'
-        DISPATCHED='dispatched','Отгрузка'
-        QC='qc','Контроль'
-        NOTE='note','Заметка'
+        ARRIVED = 'arrived', 'Поступление'
+        STORED = 'stored', 'Размещение'
+        MOVED = 'moved', 'Перемещение'
+        PICKED = 'picked', 'Отбор'
+        DISPATCHED = 'dispatched', 'Отгрузка'
+        QC = 'qc', 'Контроль'
+        NOTE = 'note', 'Заметка'
 
-    cargo = models.ForeignKey('Cargo', on_delete=models.CASCADE, related_name='events', db_index=True)
+    cargo = models.ForeignKey(
+        'Cargo',
+        on_delete=models.CASCADE,
+        related_name='events',
+        db_index=True
+    )
     event_type = models.CharField(max_length=16, choices=EventType.choices)
     timestamp = models.DateTimeField(auto_now_add=True, db_index=True)
 
-    from_slot = models.ForeignKey('LocationSlot', null=True, blank=True, on_delete=models.SET_NULL, related_name='events_from')
-    to_slot   = models.ForeignKey('LocationSlot', null=True, blank=True, on_delete=models.SET_NULL, related_name='events_to')
+    from_slot = models.ForeignKey(
+        'LocationSlot',
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='events_from'
+    )
+    to_slot = models.ForeignKey(
+        'LocationSlot',
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='events_to'
+    )
 
-    employee = models.ForeignKey('Employee', null=True, blank=True, on_delete=models.SET_NULL)
+    employee = models.ForeignKey(
+        'Employee',
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL
+    )
     quantity = models.PositiveIntegerField(default=0)
     note = models.TextField(blank=True)
 
     class Meta:
-        ordering = ['-timestamp','id']
+        ordering = ['-timestamp', 'id']
         indexes = [
-            models.Index(fields=['event_type','timestamp']),
-            models.Index(fields=['cargo','timestamp']),
+            models.Index(fields=['event_type', 'timestamp']),
+            models.Index(fields=['cargo', 'timestamp']),
         ]
 
     def __str__(self):
-        return f"[{self.at:%Y-%m-%d %H:%M}] {self.cargo.cargo_code}: {self.get_event_type_display()}"
+        return f"[{self.timestamp:%Y-%m-%d %H:%M}] {self.cargo.cargo_code}: {self.get_event_type_display()}"
 
 
 # === Ячейки хранения ===
 class StorageLocation(models.Model):
     class LocationType(models.TextChoices):
-        RECEIVING = 'receiving', _('Receiving dock')     # зона приемки
-        STAGING   = 'staging',   _('Staging area')       # буфер
-        RACK      = 'rack',      _('Rack/bin')           # стеллаж/ячейка
-        PICK_FACE = 'pick',      _('Pick face')          # отборочная зона
-        OUTBOUND  = 'outbound',  _('Outbound dock')      # отгрузка
-        QC        = 'qc',        _('Quality control')    # контроль качества
+        RECEIVING = 'receiving', _('Receiving dock')  # зона приемки
+        STAGING = 'staging', _('Staging area')        # буфер
+        RACK = 'rack', _('Rack/bin')                  # стеллаж/ячейка
+        PICK_FACE = 'pick', _('Pick face')            # отборочная зона
+        OUTBOUND = 'outbound', _('Outbound dock')     # отгрузка
+        QC = 'qc', _('Quality control')               # контроль качества
 
     code = models.CharField(max_length=64, unique=True)  # Человеческий/сканируемый код ячейки, например Z1-A02-R03-S1-B05
-    location_type = models.CharField(max_length=16, choices=LocationType.choices, default=LocationType.RACK)
+    location_type = models.CharField(
+        max_length=16,
+        choices=LocationType.choices,
+        default=LocationType.RACK
+    )
 
     # Примитивная адресация (полезна для генератора ячеек и фильтров)
-    zone  = models.CharField(max_length=16, blank=True)
+    zone = models.CharField(max_length=16, blank=True)
     aisle = models.CharField(max_length=16, blank=True)
-    rack  = models.CharField(max_length=16, blank=True)
+    rack = models.CharField(max_length=16, blank=True)
     shelf = models.CharField(max_length=16, blank=True)
-    bin   = models.CharField(max_length=16, blank=True)
+    bin = models.CharField(max_length=16, blank=True)
 
     class SlotSize(models.TextChoices):
         PALLET = 'pallet', _('Pallet-size')
-        CRATE  = 'crate',  _('Crate-size')
-        DRUM   = 'drum',   _('Drum-size')
-        BOX    = 'box',    _('Box-size')
-        TOTE   = 'tote',   _('Tote-size')
+        CRATE = 'crate', _('Crate-size')
+        DRUM = 'drum', _('Drum-size')
+        BOX = 'box', _('Box-size')
+        TOTE = 'tote', _('Tote-size')
 
     slot_count = models.PositiveSmallIntegerField(default=1)
-    slot_size_class = models.CharField(max_length=16, choices=SlotSize.choices, default=SlotSize.PALLET)
+    slot_size_class = models.CharField(
+        max_length=16,
+        choices=SlotSize.choices,
+        default=SlotSize.PALLET
+    )
 
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        ordering = ['zone','aisle','rack','shelf','bin','code']
+        ordering = ['zone', 'aisle', 'rack', 'shelf', 'bin', 'code']
         indexes = [
             models.Index(fields=['location_type']),
-            models.Index(fields=['zone','aisle','rack']),
+            models.Index(fields=['zone', 'aisle', 'rack']),
         ]
 
     def __str__(self):
@@ -271,19 +335,27 @@ class StorageLocation(models.Model):
 
 # === Слоты ячеек ===
 class LocationSlot(models.Model):
-    location = models.ForeignKey('StorageLocation', on_delete=models.CASCADE, related_name='slots', db_index=True)
+    location = models.ForeignKey(
+        'StorageLocation',
+        on_delete=models.CASCADE,
+        related_name='slots',
+        db_index=True
+    )
     index = models.PositiveSmallIntegerField(help_text="Порядковый номер слота внутри локации (1..slot_count)")
     code = models.CharField(max_length=80, unique=True)  # например: "{location.code}-#1"
-    size_class = models.CharField(max_length=16, choices=StorageLocation.SlotSize.choices)
+    size_class = models.CharField(
+        max_length=16,
+        choices=StorageLocation.SlotSize.choices
+    )
 
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        unique_together = (('location','index'),)
-        ordering = ['location_id','index']
+        unique_together = (('location', 'index'),)
+        ordering = ['location_id', 'index']
         indexes = [
-            models.Index(fields=['location','index']),
+            models.Index(fields=['location', 'index']),
         ]
 
     def __str__(self):
@@ -312,8 +384,15 @@ class Task(models.Model):
     name = models.CharField(max_length=120)
     description = models.TextField()
 
-    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
-    priority = models.PositiveSmallIntegerField(default=0, help_text="0..n, выше — важнее")
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.PENDING
+    )
+    priority = models.PositiveSmallIntegerField(
+        default=0,
+        help_text="0..n, выше — важнее"
+    )
 
     difficulty = models.PositiveSmallIntegerField(default=1)
     estimated_minutes = models.PositiveIntegerField(default=0)
@@ -341,13 +420,30 @@ class Task(models.Model):
         db_index=True
     )
 
-    assigned_to = models.ForeignKey('Employee', null=True, blank=True, on_delete=models.SET_NULL)
-    required_qualifications = models.ManyToManyField('Qualification', blank=True)
+    assigned_to = models.ForeignKey(
+        'Employee',
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL
+    )
+    required_qualifications = models.ManyToManyField(
+        'Qualification',
+        blank=True
+    )
 
-    cargo = models.ForeignKey('Cargo', null=True, blank=True, on_delete=models.SET_NULL)
-    
+    cargo = models.ForeignKey(
+        'Cargo',
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL
+    )
+
     external_ref = models.CharField(max_length=64, null=True, blank=True)
-    source = models.CharField(max_length=16, choices=[('manual','manual'),('auto','auto')], default='auto')
+    source = models.CharField(
+        max_length=16,
+        choices=[('manual', 'manual'), ('auto', 'auto')],
+        default='auto'
+    )
 
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -362,23 +458,43 @@ class Task(models.Model):
             models.Index(fields=['assigned_to', 'status']),
         ]
         constraints = [
-            models.CheckConstraint(check=Q(difficulty__gte=1) & Q(difficulty__lte=5), name='task_difficulty_1_5'),
-            models.CheckConstraint(check=Q(due_at__isnull=True) | Q(due_at__gte=models.F('created_at')), name='task_due_after_created'),
-            models.UniqueConstraint(fields=['assigned_to'], condition=Q(status__in=['in_progress','paused']),
-                                    name='unique_active_task_per_employee'),
+            models.CheckConstraint(
+                check=Q(difficulty__gte=1) & Q(difficulty__lte=5),
+                name='task_difficulty_1_5'
+            ),
+            models.CheckConstraint(
+                check=Q(due_at__isnull=True) | Q(due_at__gte=models.F('created_at')),
+                name='task_due_after_created'
+            ),
+            models.UniqueConstraint(
+                fields=['assigned_to'],
+                condition=Q(status__in=['in_progress', 'paused']),
+                name='unique_active_task_per_employee'
+            ),
         ]
         ordering = ('-priority', 'due_at', 'id')
 
 
 # === История назначения задач ===
 class TaskAssignmentLog(models.Model):
-    task = models.ForeignKey('Task', on_delete=models.CASCADE, related_name='assignment_history')
+    task = models.ForeignKey(
+        'Task',
+        on_delete=models.CASCADE,
+        related_name='assignment_history'
+    )
     employee = models.ForeignKey('Employee', on_delete=models.CASCADE)
-    timestamp = models.DateTimeField(auto_now_add=True)
+    timestamp = models.DateTimeField(auto_now_add=True, db_index=True)
     note = models.TextField(blank=True)
 
+    class Meta:
+        ordering = ['-timestamp', 'id']
+        indexes = [
+            models.Index(fields=['task', 'timestamp']),
+            models.Index(fields=['employee', 'timestamp']),
+        ]
+
     def __str__(self):
-        return f"{self.task} → {self.employee} @ {self.timestamp}"
+        return f"{self.task} → {self.employee} @ {self.timestamp:%Y-%m-%d %H:%M}"
 
 
 # === Пул для задач ===
