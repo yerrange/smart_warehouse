@@ -2,6 +2,7 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Live Задачи</title>
   <style>
     table { width: 100%; border-collapse: collapse; margin-top: 20px; }
@@ -11,7 +12,7 @@
     tr.assigned-task { background-color: #fff3cd; }
   </style>
 </head>
-<body>
+<body data-api-base="/tasks/">
   <h1>🔥 Live Задачи</h1>
   <table id="taskTable">
     <thead>
@@ -28,82 +29,91 @@
 
   <script>
     const tbody = document.querySelector("#taskTable tbody");
+    const API_BASE = document.body.dataset.apiBase || "/tasks/";
 
     function formatEmployee(person) {
       if (!person) return "-";
-      return [
-        person.employee_code ?? "",
-        person.first_name ?? "",
-        person.last_name ?? ""
-      ].join(" ").trim();
+      return [person.employee_code ?? "", person.first_name ?? "", person.last_name ?? ""]
+        .join(" ").replace(/\s+/g, " ").trim();
     }
 
-    function renderRow(data, source = "WebSocket") {
-      const row = document.createElement("tr");
-      row.innerHTML = `
-        <td>${data.id}</td>
+    function getRow(taskId) {
+      return tbody.querySelector(`tr[data-task-id="${taskId}"]`);
+    }
+
+    function upsertRow(data, source = "WebSocket") {
+      const id = data.id ?? data.pk ?? null;
+      if (id == null) return;
+
+      let row = getRow(id);
+      const html = `
+        <td>${id}</td>
         <td>${data.description ?? data.name ?? "-"}</td>
-        <td>${data.status}</td>
+        <td>${data.status ?? "-"}</td>
         <td>${formatEmployee(data.employee ?? data.assigned_to)}</td>
         <td>${source}</td>
       `;
-      if (data.status === "in_progress" || data.employee || data.assigned_to) {
-        row.classList.add("assigned-task");
-      } else {
-        row.classList.add("new-task");
+
+      if (!row) {
+        row = document.createElement("tr");
+        row.dataset.taskId = id;
+        tbody.prepend(row);
       }
-      tbody.prepend(row);
+      row.classList.toggle("assigned-task", (data.status === "in_progress") || !!(data.employee || data.assigned_to));
+      row.classList.toggle("new-task", !(data.status === "in_progress") && !(data.employee || data.assigned_to));
+      row.innerHTML = html;
     }
 
-    // 1️⃣ Загрузка задач через API
-    fetch("/api/tasks/?status=in_progress")
-      .then(response => response.json())
-      .then(tasks => {
-        tasks.forEach(task => {
-          if (task.status === "in_progress") {
-            renderRow(task, "API");
-          }
-        });
-        console.log("✅ Задачи загружены");
+    // 1) Загрузка активных задач через API (учитываем обе формы ответа: массив или {results: [...]})
+    fetch(`${API_BASE}?status=in_progress`)
+      .then(r => r.json())
+      .then(payload => {
+        const items = Array.isArray(payload) ? payload : (payload.results || []);
+        items.forEach(task => upsertRow(task, "API"));
+        console.log("✅ Задачи загружены:", items.length);
       })
       .catch(error => console.error("❌ Ошибка API:", error));
 
-    // 2️⃣ WebSocket подключение
-    const socket = new WebSocket("ws://" + window.location.host + "/ws/tasks/");
+    // 2) WebSocket (ws/wss автоопределение) + автопереподключение
+    const WS_PATH = "/ws/tasks/";
+    function connectWS() {
+      const scheme = (location.protocol === "https:") ? "wss" : "ws";
+      const socket = new WebSocket(`${scheme}://${location.host}${WS_PATH}`);
 
-    socket.onopen = () => console.log("🔗 WebSocket соединён");
+      socket.onopen = () => console.log("🔗 WebSocket соединён");
+      socket.onerror = (e) => console.error("⚠️ WebSocket ошибка:", e);
+      socket.onclose = () => {
+        console.warn("🔌 WebSocket закрыт. Повторное подключение через 2с…");
+        setTimeout(connectWS, 2000);
+      };
 
-    socket.onmessage = function(event) {
-      console.log("📨 WebSocket:", event.data);
+      socket.onmessage = (event) => {
+        let data;
+        try { data = JSON.parse(event.data); }
+        catch (e) { console.error("❌ JSON ошибка:", e, event.data); return; }
 
-      let data;
-      try {
-        data = JSON.parse(event.data);
-      } catch (e) {
-        console.error("❌ JSON ошибка:", e);
-        return;
-      }
+        // Сообщение о закрытии смены
+        if (data && data.reason === "смена завершена") {
+          tbody.innerHTML = "";
+          console.log("🧹 Таблица очищена при завершении смены");
+          return;
+        }
 
-      if (data.reason === "смена завершена") {
-        tbody.innerHTML = "";
-        console.log("🧹 Таблица очищена при завершении смены");
-        return;
-      }
+        // Сообщение о завершении конкретной задачи
+        if (data && data.reason === "завершено" && data.id != null) {
+          const row = getRow(String(data.id));
+          if (row) row.remove();
+          console.log(`🗑 Удалена задача #${data.id}`);
+          return;
+        }
 
-      if (data.reason === "завершено") {
-        const row = Array.from(tbody.rows).find(r => r.cells[0].textContent == data.id);
-        if (row) row.remove();
-        console.log(`🗑 Удалена задача #${data.id}`);
-        return;
-      }
-
-      if (data.status === "in_progress") {
-        renderRow(data);
-      }
-    };
-
-    socket.onerror = error => console.error("⚠️ WebSocket ошибка:", error);
-    socket.onclose = () => console.warn("🔌 WebSocket закрыт");
+        // Сообщение о назначении/обновлении задачи
+        if (data && (data.status || data.assigned_to || data.employee)) {
+          upsertRow(data);
+        }
+      };
+    }
+    connectWS();
   </script>
 </body>
 </html>
