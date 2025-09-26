@@ -12,7 +12,7 @@
     tr.assigned-task { background-color: #fff3cd; }
   </style>
 </head>
-<body data-api-base="/tasks/">
+<body data-api-base="{% url 'task-list' %}">
   <h1>🔥 Live Задачи</h1>
   <table id="taskTable">
     <thead>
