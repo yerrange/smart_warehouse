@@ -5,6 +5,7 @@ from channels.layers import get_channel_layer
 
 from core.models import Shift, Employee, EmployeeShiftStats, TaskPool, TaskAssignmentLog
 from core.services.tasks import assign_task_to_best_employee
+from rest_framework.exceptions import ValidationError
 
 
 def create_shift(name, date, start_time, end_time) -> Shift:
@@ -56,8 +57,8 @@ def assign_tasks_from_pool_to_shift(shift: Shift) -> int:
 
 def start_shift(shift: Shift) -> int:
     """Запускает смену и назначает задачи из пула. Возвращает число назначенных задач."""
-    if shift.is_active or shift.start_time:
-        raise ValueError("Смена уже активна.")
+    if not shift.employees.exists():
+        raise ValidationError("Нельзя запустить смену без сотрудников.")
     # доменный метод (у модели) устанавливает start_time и флаги
     shift.start()
     return assign_tasks_from_pool_to_shift(shift)
