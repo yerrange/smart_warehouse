@@ -58,8 +58,13 @@ class Shift(models.Model):
     date = models.DateField(db_index=True)
     is_active = models.BooleanField(default=False, db_index=True)
 
-    start_time = models.DateTimeField(null=True, blank=True)
-    end_time = models.DateTimeField(null=True, blank=True)
+    # Плановое время
+    start_time = models.DateTimeField()
+    end_time = models.DateTimeField()
+
+    # Фактическое время
+    actual_start_time = models.DateTimeField(null=True, blank=True)
+    actual_end_time = models.DateTimeField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)

@@ -50,6 +50,12 @@ class ShiftViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Shift.objects.all()
     serializer_class = ShiftSerializer
 
+    def get_serializer_class(self):
+        # В swagger для этого action показываем входной сериализатор
+        if getattr(self, "action", None) == "create_with_employees":
+            return ShiftCreateSerializer
+        return super().get_serializer_class()
+
     @action(detail=False, methods=['post'], url_path='create_with_employees')
     def create_with_employees(self, request):
         serializer = ShiftCreateSerializer(data=request.data)
