@@ -7,8 +7,13 @@ from core.models import Shift, Employee, EmployeeShiftStats, TaskPool, TaskAssig
 from core.services.tasks import assign_task_to_best_employee
 
 
-def create_shift(shift_date: _date) -> Shift:
-    shift, _ = Shift.objects.get_or_create(date=shift_date)
+def create_shift(name, date, start_time, end_time) -> Shift:
+    shift, _ = Shift.objects.get_or_create(
+        name=name,
+        date=date,
+        start_time=start_time,
+        end_time=end_time
+    )
     return shift
 
 
@@ -20,8 +25,9 @@ def add_employees_to_shift(shift: Shift, employee_codes: list[str]) -> None:
         EmployeeShiftStats.objects.get_or_create(employee=employee, shift=shift)
 
 
-def create_shift_with_employees(shift_date: _date, employee_codes: list[str]) -> Shift:
-    shift = create_shift(shift_date)
+@transaction.atomic
+def create_shift_with_employees(name, date: _date, start_time, end_time, employee_codes: list[str]) -> Shift:
+    shift = create_shift(name, date, start_time, end_time)
     add_employees_to_shift(shift, employee_codes)
     return shift
 

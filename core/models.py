@@ -72,7 +72,8 @@ class Shift(models.Model):
     employees = models.ManyToManyField(
         'Employee',
         through='EmployeeShiftStats',
-        related_name='shifts'
+        related_name='shifts',
+        blank=True
     )
 
     class Meta:

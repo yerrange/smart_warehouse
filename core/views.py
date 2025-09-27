@@ -61,7 +61,10 @@ class ShiftViewSet(viewsets.ReadOnlyModelViewSet):
         serializer = ShiftCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         shift = create_shift_with_employees(
-            shift_date=serializer.validated_data['date'],
+            name=serializer.validated_data.get('name') if serializer.validated_data.get('name') else '',
+            date=serializer.validated_data['date'],
+            start_time=serializer.validated_data['start_time'],
+            end_time=serializer.validated_data['end_time'],
             employee_codes=serializer.validated_data['employee_codes']
         )
         return Response(ShiftSerializer(shift).data, status=status.HTTP_201_CREATED)

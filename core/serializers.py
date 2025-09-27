@@ -11,6 +11,7 @@ from core.models import (
     Cargo,
     CargoEvent,
 )
+from datetime import datetime
 
 # === Работники и смены ===
 
@@ -44,7 +45,10 @@ class ShiftSerializer(serializers.ModelSerializer):
 
 
 class ShiftCreateSerializer(serializers.Serializer):
+    name = serializers.CharField(required=False)
     date = serializers.DateField()
+    start_time = serializers.DateTimeField()
+    end_time = serializers.DateTimeField()
     employee_codes = serializers.ListField(child=serializers.CharField(), allow_empty=False)
 
     def validate_employee_codes(self, codes):
@@ -52,6 +56,16 @@ class ShiftCreateSerializer(serializers.Serializer):
         if employees.count() != len(set(codes)):
             raise serializers.ValidationError("Некоторые employee_code не найдены или неактивны.")
         return codes
+
+    def validate(self, time):
+        start_time = time.get('start_time')
+        end_time = time.get('end_time')
+
+        if end_time <= start_time:
+            raise serializers.ValidationError({
+                "end_time": "Время окончания должно быть позже времени начала."
+            })
+        return time
 
 
 class ShiftEmployeeUpdateSerializer(serializers.Serializer):
