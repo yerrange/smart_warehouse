@@ -89,16 +89,26 @@ class QualificationAdmin(admin.ModelAdmin):
 
 @admin.register(Shift)
 class ShiftAdmin(admin.ModelAdmin):
-    list_display = ("id", "name", "date", "start_time", "end_time", "is_active")
+    list_display = (
+        "id",
+        "name",
+        "date",
+        "start_time",
+        "end_time",
+        "actual_start_time",
+        "actual_end_time",
+        "is_active"
+    )
     list_filter = ("is_active", "date")
+    readonly_fields = ("actual_start_time", "actual_end_time")
     inlines = [EmployeeShiftStatsInline]
 
 
 @admin.register(EmployeeShiftStats)
 class EmployeeShiftStatsAdmin(admin.ModelAdmin):
-    list_display = ("employee", "shift", "task_count", "shift_score", "is_busy")
+    list_display = ("employee", "shift", "shift__date", "task_count", "shift_score", "is_busy")
     list_filter = ("shift", "is_busy")
-    search_fields = ("employee__first_name", "employee__last_name", "employee__employee_code")
+    search_fields = ("shift__date", "employee__first_name", "employee__last_name", "employee__employee_code")
 
 
 # === StorageLocation & LocationSlot ===

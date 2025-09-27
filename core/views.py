@@ -43,6 +43,7 @@ from core.services.tasks import (
     assign_task_to_best_employee,
     complete_task,
     assign_task_manually,
+    start_task
 )
 
 
@@ -141,6 +142,13 @@ class TaskViewSet(viewsets.ModelViewSet):
         if complete_task(task):
             return Response({"detail": "Задача завершена."})
         return Response({"detail": "Задачу нельзя завершить."}, status=400)
+
+    @action(detail=True, methods=["post"], url_path="start")
+    def start(self, request, pk=None):
+        task = self.get_object()
+        if start_task(task):
+            return Response({"detail": "Задача начата."})
+        return Response({"detail": "Задачу нельзя начать."}, status=400)
 
 
 class TaskPoolViewSet(viewsets.ModelViewSet):

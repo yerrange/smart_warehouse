@@ -30,7 +30,7 @@ def assign_task_to_best_employee(task: Task, shift: Shift | None):
 
     # назначаем
     task.assigned_to = employee
-    task.status = "in_progress"
+    task.status = "pending"
     task.shift = shift
     task.assigned_at = now()
     task.save(update_fields=["assigned_to", "status", "shift", "assigned_at", "updated_at"])
@@ -38,8 +38,7 @@ def assign_task_to_best_employee(task: Task, shift: Shift | None):
     TaskAssignmentLog.objects.create(task=task, employee=employee, note="Автоназначение (эвристика)")
 
     selected.task_count = (selected.task_count or 0) + 1
-    selected.is_busy = True
-    selected.save(update_fields=["task_count", "is_busy"])
+    selected.save(update_fields=["task_count"])
 
     channel_layer = get_channel_layer()
     async_to_sync(channel_layer.group_send)(
@@ -62,16 +61,15 @@ def assign_task_manually(task: Task, employee_code: str) -> None:
 
     # Приведём задачу к in_progress на выбранного сотрудника
     task.assigned_to = employee
-    task.status = "in_progress"
+    task.status = "pending"
     task.assigned_at = now()
     task.save(update_fields=["assigned_to", "status", "assigned_at", "updated_at"])
 
     # Если задача в смене — обновить статистику
     if task.shift_id:
         stats, _ = EmployeeShiftStats.objects.get_or_create(employee=employee, shift=task.shift)
-        stats.is_busy = True
         stats.task_count = (stats.task_count or 0) + 1
-        stats.save(update_fields=["is_busy", "task_count"])
+        stats.save(update_fields=["task_count"])
 
     TaskAssignmentLog.objects.create(task=task, employee=employee, note="Ручное назначение через API")
 
@@ -88,7 +86,8 @@ def complete_task(task: Task) -> bool:
         return False
 
     task.status = "completed"
-    task.save(update_fields=["status", "updated_at"])
+    task.completed_at = now()
+    task.save(update_fields=["status", "completed_at", "updated_at"])
 
     if task.shift_id:
         try:
@@ -102,6 +101,27 @@ def complete_task(task: Task) -> bool:
     channel_layer = get_channel_layer()
     async_to_sync(channel_layer.group_send)(
         "task_updates",
-        {"type": "task_completed", "message": {"id": task.id, "reason": "завершено"}},
+        {"type": "task_completed", "message": TaskReadSerializer(task).data},
+    )
+    return True
+
+
+@transaction.atomic
+def start_task(task: Task) -> bool:
+    if task.status != "pending" or not task.assigned_to:
+        return False
+
+    task.status = "in_progress"
+    task.started_at = now()
+    task.save(update_fields=["status", "started_at", "updated_at"])
+
+    stats = task.shift.employee_stats.get(employee=task.assigned_to)
+    stats.is_busy = True
+    stats.save(update_fields=["is_busy"])
+
+    channel_layer = get_channel_layer()
+    async_to_sync(channel_layer.group_send)(
+        "task_updates",
+        {"type": "task_started", "message": TaskReadSerializer(task).data},
     )
     return True

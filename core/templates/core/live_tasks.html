@@ -10,6 +10,7 @@
     th { background: #f0f0f0; }
     tr.new-task { background-color: #e8f7e4; }
     tr.assigned-task { background-color: #fff3cd; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   </style>
 </head>
 <body data-api-base="{% url 'task-list' %}">
@@ -18,8 +19,10 @@
     <thead>
       <tr>
         <th>ID</th>
+        <th>Название</th>
         <th>Описание</th>
         <th>Статус</th>
+        <th>Смена</th>
         <th>Сотрудник</th>
         <th>Источник</th>
       </tr>
@@ -32,25 +35,68 @@
     const API_BASE = document.body.dataset.apiBase || "/tasks/";
 
     function formatEmployee(person) {
-      if (!person) return "-";
-      return [person.employee_code ?? "", person.first_name ?? "", person.last_name ?? ""]
-        .join(" ").replace(/\s+/g, " ").trim();
+      // поддержка и {assigned_to:{...}}, и {employee:{...}}, и просто null
+      const p = person ?? null;
+      if (!p) return "-";
+      const code = p.employee_code ?? p.code ?? "";
+      const first = p.first_name ?? "";
+      const last  = p.last_name ?? "";
+      const full  = [first, last].join(" ").trim();
+      return (code ? code + (full ? " — " : "") : "") + (full || "-");
+    }
+
+    function formatShift(shift) {
+      if (shift == null) return "-";
+      // если пришёл числовой id
+      if (typeof shift === "number" || typeof shift === "string") {
+        return `#${shift}`;
+      }
+      // если вложенный объект
+      const id   = shift.id ?? "";
+      const name = shift.name ?? "";
+      const date = shift.date ?? "";
+      const labelParts = [];
+      if (id)   labelParts.push(`#${id}`);
+      if (name) labelParts.push(name);
+      if (date) labelParts.push(`(${date})`);
+      return labelParts.join(" ") || "-";
+    }
+
+    function pickTitle(data) {
+      // поддержка разных имён поля: title/name
+      return (data.title ?? data.name ?? "").toString().trim() || "-";
+    }
+
+    function pickDescription(data) {
+      return (data.description ?? "").toString().trim() || "-";
     }
 
     function getRow(taskId) {
       return tbody.querySelector(`tr[data-task-id="${taskId}"]`);
     }
 
-    function upsertRow(data, source = "WebSocket") {
+    function upsertRow(data, source = "Auto") {
       const id = data.id ?? data.pk ?? null;
       if (id == null) return;
 
+      const title = pickTitle(data);
+      const desc  = pickDescription(data);
+      const status = data.status ?? "-";
+
+      // сотрудник может приходить как assigned_to или employee
+      const employeeObj = data.assigned_to ?? data.employee ?? null;
+
+      // смена может быть id или объектом
+      const shiftObj = data.shift ?? null;
+
       let row = getRow(id);
       const html = `
-        <td>${id}</td>
-        <td>${data.description ?? data.name ?? "-"}</td>
-        <td>${data.status ?? "-"}</td>
-        <td>${formatEmployee(data.employee ?? data.assigned_to)}</td>
+        <td class="mono">${id}</td>
+        <td>${title}</td>
+        <td>${desc}</td>
+        <td>${status}</td>
+        <td>${formatShift(shiftObj)}</td>
+        <td>${formatEmployee(employeeObj)}</td>
         <td>${source}</td>
       `;
 
@@ -59,28 +105,31 @@
         row.dataset.taskId = id;
         tbody.prepend(row);
       }
-      row.classList.toggle("assigned-task", (data.status === "in_progress") || !!(data.employee || data.assigned_to));
-      row.classList.toggle("new-task", !(data.status === "in_progress") && !(data.employee || data.assigned_to));
+
+      const hasAssignee = !!employeeObj;
+      const isInProgress = (status === "in_progress");
+      row.classList.toggle("assigned-task", isInProgress || hasAssignee);
+      row.classList.toggle("new-task", !(isInProgress || hasAssignee));
       row.innerHTML = html;
     }
 
-    // 1) Загрузка активных задач через API (учитываем обе формы ответа: массив или {results: [...]})
+    // 1) Первичная загрузка активных задач
     fetch(`${API_BASE}?status=in_progress`)
       .then(r => r.json())
       .then(payload => {
         const items = Array.isArray(payload) ? payload : (payload.results || []);
-        items.forEach(task => upsertRow(task, "API"));
+        items.forEach(task => upsertRow(task, "Auto"));
         console.log("✅ Задачи загружены:", items.length);
       })
       .catch(error => console.error("❌ Ошибка API:", error));
 
-    // 2) WebSocket (ws/wss автоопределение) + автопереподключение
+    // 2) WebSocket + автопереподключение
     const WS_PATH = "/ws/tasks/";
     function connectWS() {
       const scheme = (location.protocol === "https:") ? "wss" : "ws";
       const socket = new WebSocket(`${scheme}://${location.host}${WS_PATH}`);
 
-      socket.onopen = () => console.log("🔗 WebSocket соединён");
+      socket.onopen  = () => console.log("🔗 WebSocket соединён");
       socket.onerror = (e) => console.error("⚠️ WebSocket ошибка:", e);
       socket.onclose = () => {
         console.warn("🔌 WebSocket закрыт. Повторное подключение через 2с…");
@@ -92,14 +141,14 @@
         try { data = JSON.parse(event.data); }
         catch (e) { console.error("❌ JSON ошибка:", e, event.data); return; }
 
-        // Сообщение о закрытии смены
+        // Смена завершена → очистить таблицу
         if (data && data.reason === "смена завершена") {
           tbody.innerHTML = "";
           console.log("🧹 Таблица очищена при завершении смены");
           return;
         }
 
-        // Сообщение о завершении конкретной задачи
+        // Конкретная задача завершена → убрать строку
         if (data && data.reason === "завершено" && data.id != null) {
           const row = getRow(String(data.id));
           if (row) row.remove();
@@ -107,9 +156,9 @@
           return;
         }
 
-        // Сообщение о назначении/обновлении задачи
-        if (data && (data.status || data.assigned_to || data.employee)) {
-          upsertRow(data);
+        // Любое обновление задачи → апсерт строки
+        if (data && (data.id != null)) {
+          upsertRow(data, "Auto");
         }
       };
     }
