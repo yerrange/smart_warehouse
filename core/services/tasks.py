@@ -1,4 +1,5 @@
 from django.db import transaction
+from django.db.models import Count, Q
 from django.utils.timezone import now
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
@@ -16,30 +17,70 @@ def employee_has_all_qualifications(employee: Employee, task: Task) -> bool:
 
 @transaction.atomic
 def assign_task_to_best_employee(task: Task, shift: Shift | None):
+    """
+    Назначает задачу сотруднику так, чтобы у него не было одновременно нескольких pending-задач.
+    Возвращает Employee или None.
+    """
     if task.assigned_to or task.status != "pending" or not shift:
         return None
 
-    stats = EmployeeShiftStats.objects.filter(shift=shift, is_busy=False)
-    eligible = [s for s in stats if employee_has_all_qualifications(s.employee, task)]
+    # Подходим только не занятые сотрудники смены И без уже назначенных pending-задач в этой смене
+    stats_qs = (
+        EmployeeShiftStats.objects
+        .select_related("employee")
+        .filter(shift=shift, is_busy=False)
+        .annotate(
+            pending_assigned=Count(
+                "employee__tasks",
+                filter=Q(
+                    employee__tasks__status="pending",
+                    employee__tasks__shift=shift,
+                )
+            )
+        )
+        .filter(pending_assigned=0)
+    )
+
+    # Отфильтруем по квалификациям 
+    eligible = [s for s in stats_qs if employee_has_all_qualifications(s.employee, task)]
     if not eligible:
         return None
 
-    eligible.sort(key=lambda s: (s.task_count, s.shift_score))
+    # Сортировка: меньше выполнял/меньше набрал очков
+    eligible.sort(key=lambda s: (s.task_count or 0, s.shift_score or 0))
     selected = eligible[0]
     employee = selected.employee
 
-    # назначаем
-    task.assigned_to = employee
-    task.status = "pending"
-    task.shift = shift
-    task.assigned_at = now()
-    task.save(update_fields=["assigned_to", "status", "shift", "assigned_at", "updated_at"])
+    # Атомарно назначаем только если задача всё ещё pending и без смены/исполнителя
+    # (или если смена уже установлена заранее — разрешим, но не перезаписываем другие поля)
+    updated = (
+        Task.objects
+        .filter(pk=task.pk, status="pending", assigned_to__isnull=True)
+        .update(
+            assigned_to=employee,
+            shift=shift if task.shift_id is None else task.shift,
+            assigned_at=now(),
+            updated_at=now(),
+        )
+    )
+    if not updated:
+        return None  # гонка: кто-то уже изменил задачу
 
-    TaskAssignmentLog.objects.create(task=task, employee=employee, note="Автоназначение (эвристика)")
+    # Обновим инстанс task для отправки по WS/логов без повторного запроса
+    task.assigned_to = employee
+    if task.shift_id is None:
+        task.shift = shift
+        task.shift_id = shift.id
+    task.assigned_at = now()
+
+    # Лог (как было)
+    # TaskAssignmentLog.objects.create(task=task, employee=employee, note="Автоназначение (эвристика)")
+
 
     selected.task_count = (selected.task_count or 0) + 1
     selected.save(update_fields=["task_count"])
 
+    # WS: шлём ПОЛНУЮ задачу (статус остаётся "pending")
     channel_layer = get_channel_layer()
     async_to_sync(channel_layer.group_send)(
         "task_updates",
