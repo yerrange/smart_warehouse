@@ -85,8 +85,8 @@ class ShiftViewSet(viewsets.ReadOnlyModelViewSet):
             return Response({"detail": str(e)}, status=400)
         return Response({"detail": f"Смена запущена. Назначено из пула: {assigned} задач."}, status=200)
 
-    @action(detail=True, methods=["post"], url_path="close")
-    def close(self, request, pk=None):
+    @action(detail=True, methods=["post"], url_path="end")
+    def end_shift(self, request, pk=None):
         shift: Shift = self.get_object()
         try:
             returned_count = service_close_shift(shift)

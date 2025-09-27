@@ -100,7 +100,7 @@ class Shift(models.Model):
 
     # Доменные действия с инвариантами
     def can_start(self) -> bool:
-        return not self.is_active and self.start_time is None
+        return not self.is_active and self.actual_start_time is None
 
     def can_close(self) -> bool:
         return self.is_active
@@ -109,15 +109,15 @@ class Shift(models.Model):
         if not self.can_start():
             raise ValueError("Нельзя стартовать эту смену (уже активна или была запущена).")
         self.is_active = True
-        self.start_time = now()
-        self.save(update_fields=['is_active', 'start_time', 'updated_at'])
+        self.actual_start_time = now()
+        self.save(update_fields=['is_active', 'actual_start_time', 'updated_at'])
 
     def close(self) -> None:
         if not self.can_close():
             raise ValueError("Нельзя закрыть неактивную смену.")
         self.is_active = False
-        self.end_time = now()
-        self.save(update_fields=['is_active', 'end_time', 'updated_at'])
+        self.actual_end_time = now()
+        self.save(update_fields=['is_active', 'actual_end_time', 'updated_at'])
 
 
 # === Динамическая статистика по сменам ===
