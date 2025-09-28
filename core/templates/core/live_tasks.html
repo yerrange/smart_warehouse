@@ -1,20 +1,24 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Live Задачи</title>
   <style>
-    table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-    th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
-    th { background: #f0f0f0; }
-    tr.new-task { background-color: #e8f7e4; }
-    tr.assigned-task { background-color: #fff3cd; }
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    table { width:100%; border-collapse:collapse; margin-top:20px }
+    th,td { border:1px solid #ccc; padding:8px; text-align:left }
+    th { background:#f0f0f0 }
+    tr.new-task { background:#e8f7e4 }
+    tr.assigned-task { background:#fff3cd }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace }
   </style>
 </head>
-<body data-api-base="{% url 'task-list' %}">
+<body
+  data-pool-id="{{ pool_id }}"
+  data-fallback-url="{% url 'task-list' %}"
+>
   <h1>🔥 Live Задачи</h1>
+
   <table id="taskTable">
     <thead>
       <tr>
@@ -32,130 +36,85 @@
 
   <script>
     const tbody = document.querySelector("#taskTable tbody");
-    const API_BASE = document.body.dataset.apiBase || "/tasks/";
-    const ALLOWED_STATUSES = new Set(["pending", "in_progress"]);
+    const poolId = (document.body.dataset.poolId || "").trim();
+    const fallbackUrl = document.body.dataset.fallbackUrl;  // /api/tasks/ (имя 'task-list')
 
-    function formatEmployee(person) {
-      const p = person ?? null;
-      if (!p) return "-";
-      const code = p.employee_code ?? p.code ?? "";
-      const first = p.first_name ?? "";
-      const last  = p.last_name ?? "";
-      const full  = [first, last].join(" ").trim();
-      return (code ? code + (full ? " — " : "") : "") + (full || "-");
+    // Если poolId есть — берём задачи из пула, иначе — общий список (фолбэк)
+    const API_BASE = poolId ? `/api/task-pools/${poolId}/tasks/` : fallbackUrl;
+
+    // Разрешённые статусы (финальные сервер и так отфильтрует)
+    const ALLOWED_STATUSES = new Set(["new","assigned","accepted","in_progress","pending"]);
+
+    function formatEmployee(emp){
+      if(!emp) return "-";
+      const code = emp.employee_code ?? emp.code ?? "";
+      const name = [emp.first_name ?? "", emp.last_name ?? ""].join(" ").trim();
+      return (code ? code + (name ? " — " : "") : "") + (name || "-");
     }
-
-    function formatShift(shift) {
-      if (shift == null) return "-";
-      if (typeof shift === "number" || typeof shift === "string") {
-        return `#${shift}`;
-      }
-      const id   = shift.id ?? "";
-      const name = shift.name ?? "";
-      const date = shift.date ?? "";
-      const parts = [];
-      if (id) parts.push(`#${id}`);
-      if (name) parts.push(name);
-      if (date) parts.push(`(${date})`);
-      return parts.join(" ") || "-";
+    function formatShift(shift){
+      if(!shift) return "-";
+      const id = shift.id ?? ""; const name = shift.name ?? ""; const date = shift.date ?? "";
+      return [id?`#${id}`:"", name, date?`(${date})`:""].filter(Boolean).join(" ");
     }
+    function pickTitle(t){ return (t.title ?? t.name ?? "").toString().trim() || "-"; }
+    function pickDescription(t){ return (t.description ?? "").toString().trim() || "-"; }
+    function getRow(id){ return tbody.querySelector(`tr[data-task-id="${id}"]`); }
 
-    function pickTitle(data) {
-      return (data.title ?? data.name ?? "").toString().trim() || "-";
-    }
-
-    function pickDescription(data) {
-      return (data.description ?? "").toString().trim() || "-";
-    }
-
-    function getRow(taskId) {
-      return tbody.querySelector(`tr[data-task-id="${taskId}"]`);
-    }
-
-    function upsertRow(data, source = "Auto") {
-      const id = data.id ?? data.pk ?? null;
-      if (id == null) return;
-      const status = data.status ?? "-";
-      if (!ALLOWED_STATUSES.has(status)) {
-        if (status === "completed") {
-          const row = getRow(String(id));
-          if (row) row.remove();
-        }
+    function upsertRow(t, source="Auto"){
+      const id = t.id ?? t.pk; if(id == null) return;
+      const status = t.status ?? "-";
+      if(!ALLOWED_STATUSES.has(status)){
+        if(status === "completed"){ const r = getRow(String(id)); if(r) r.remove(); }
         return;
       }
-
-      const title = pickTitle(data);
-      const desc  = pickDescription(data);
-      const employeeObj = data.assigned_to ?? data.employee ?? null;
-      const shiftObj    = data.shift ?? null;
-
       let row = getRow(id);
-      const html = `
-        <td class="mono">${id}</td>
-        <td>${title}</td>
-        <td>${desc}</td>
-        <td>${status}</td>
-        <td>${formatShift(shiftObj)}</td>
-        <td>${formatEmployee(employeeObj)}</td>
-        <td>${source}</td>
-      `;
-
-      if (!row) {
+      if(!row){
         row = document.createElement("tr");
         row.dataset.taskId = id;
         tbody.prepend(row);
       }
-
-      const hasAssignee = !!employeeObj;
-      const isInProgress = (status === "in_progress");
-      row.classList.toggle("assigned-task", isInProgress || hasAssignee);
-      row.classList.toggle("new-task", !(isInProgress || hasAssignee));
-      row.innerHTML = html;
+      row.classList.toggle("assigned-task", status==="in_progress" || !!t.assigned_to);
+      row.classList.toggle("new-task", !(status==="in_progress" || !!t.assigned_to));
+      row.innerHTML = `
+        <td class="mono">${id}</td>
+        <td>${pickTitle(t)}</td>
+        <td>${pickDescription(t)}</td>
+        <td>${status}</td>
+        <td>${formatShift(t.shift)}</td>
+        <td>${formatEmployee(t.assigned_to)}</td>
+        <td>${source}</td>
+      `;
     }
 
-    fetch(`${API_BASE}`)
+    // 1) начальная загрузка — ТОЛЬКО из пула (или фолбэк)
+    fetch(API_BASE)
       .then(r => r.json())
-      .then(payload => {
-        const items = Array.isArray(payload) ? payload : (payload.results || []);
-        items.filter(t => ALLOWED_STATUSES.has(t.status))
-             .forEach(task => upsertRow(task, "Auto"));
-        console.log("Задачи загружены:", items.length);
+      .then(items => {
+        const list = Array.isArray(items) ? items : (items.results || []);
+        list.filter(t => ALLOWED_STATUSES.has(t.status)).forEach(t => upsertRow(t, poolId ? "Pool" : "All"));
+        console.log(`Задачи загружены из ${poolId ? "пула #"+poolId : "общего списка"}:`, list.length);
       })
-      .catch(error => console.error("Ошибка API:", error));
+      .catch(err => console.error("Ошибка загрузки:", err));
 
+    // 2) WebSocket — как было (стримим дельты)
     const WS_PATH = "/ws/tasks/";
-    function connectWS() {
-      const scheme = (location.protocol === "https:") ? "wss" : "ws";
-      const socket = new WebSocket(`${scheme}://${location.host}${WS_PATH}`);
-
-      socket.onopen  = () => console.log("WebSocket соединён");
-      socket.onerror = (e) => console.error("WebSocket ошибка:", e);
-      socket.onclose = () => {
-        console.warn("WebSocket закрыт. Повторное подключение через 2с…");
-        setTimeout(connectWS, 2000);
-      };
-
-      socket.onmessage = (event) => {
-        let data;
-        try { data = JSON.parse(event.data); }
-        catch (e) { console.error("JSON ошибка:", e, event.data); return; }
-
-        if (data && data.reason === "смена завершена") {
-          tbody.innerHTML = "";
-          return;
+    function connectWS(){
+      const scheme = location.protocol === "https:" ? "wss" : "ws";
+      const ws = new WebSocket(`${scheme}://${location.host}${WS_PATH}`);
+      ws.onopen  = () => console.log("WS: connected");
+      ws.onerror = (e) => console.error("WS error:", e);
+      ws.onclose = () => { console.warn("WS closed, retry in 2s…"); setTimeout(connectWS, 2000); };
+      ws.onmessage = (e) => {
+        let data; try{ data=JSON.parse(e.data) }catch{ return }
+        if (data?.reason === "смена завершена"){ tbody.innerHTML=""; return }
+        if (data?.reason === "завершено" || data?.status === "completed"){
+          const row = getRow(String(data.id)); if(row) row.remove(); return
         }
-
-        if ((data && data.reason === "завершено") || (data && data.status === "completed")) {
-          const row = getRow(String(data.id));
-          if (row) row.remove();
-          return;
-        }
-
-        if (data && data.id != null) {
+        if (data && data.id != null){
           if (!ALLOWED_STATUSES.has(data.status)) return;
           upsertRow(data, "WS");
         }
-      };
+      }
     }
     connectWS();
   </script>

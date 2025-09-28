@@ -105,7 +105,7 @@ class TaskViewSet(viewsets.ModelViewSet):
     #     if statuses:
     #         return qs.filter(status__in=statuses)
     #     return qs.exclude(status="completed")
-    
+
     serializer_class = TaskReadSerializer
     filterset_fields = ['status']
 
@@ -159,9 +159,23 @@ class TaskViewSet(viewsets.ModelViewSet):
         return Response({"detail": "Задачу нельзя начать."}, status=400)
 
 
-class TaskPoolViewSet(viewsets.ModelViewSet):
+class TaskPoolViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    Источник данных для live_tasks.html:
+    GET /api/task-pools/<pk>/tasks/ — вернуть задачи пула (без финальных статусов).
+    """
     queryset = TaskPool.objects.all()
-    serializer_class = TaskPoolSerializer
+    # ВАЖНО: используем стандартный lookup по PK, чтобы не зависеть от наличия поля 'code'
+    # (URL будет /api/task-pools/<pk>/tasks/)
+    @action(detail=True, methods=["get"], url_path="tasks")
+    def tasks(self, request, pk=None):
+        pool: TaskPool = self.get_object()
+        qs = pool.tasks.all().select_related("shift", "assigned_to", "cargo")
+        include_final = request.query_params.get("include_final") in ("1", "true", "True")
+        if not include_final:
+            qs = qs.exclude(status__in=["completed", "canceled", "expired"])
+        qs = qs.order_by("-priority", "created_at")
+        return Response(TaskReadSerializer(qs, many=True).data)
 
 
 class CargoViewSet(viewsets.ModelViewSet):
@@ -180,4 +194,13 @@ class EmployeeViewSet(viewsets.ModelViewSet):
 
 
 def live_tasks_view(request):
-    return render(request, "core/live_tasks.html")
+    """
+    Рендерим страницу и передаём pool_id (если пул существует).
+    Если активного нет — берём первый попавшийся; если нет вообще — отдадим пустую строку.
+    """
+    pool = TaskPool.objects.filter(is_active=True).first() or TaskPool.objects.first()
+    context = {
+        "pool": pool,                       # оставим, если где-то ещё используется
+        "pool_id": pool.id if pool else "", # ГЛАВНОЕ: ID для JS
+    }
+    return render(request, "core/live_tasks.html", context)

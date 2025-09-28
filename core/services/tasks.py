@@ -128,7 +128,15 @@ def complete_task(task: Task) -> bool:
 
     task.status = "completed"
     task.completed_at = now()
-    task.save(update_fields=["status", "completed_at", "updated_at"])
+    task.task_pool = None
+    task.save(
+        update_fields=[
+            "status",
+            "completed_at",
+            "updated_at",
+            "task_pool"
+        ]
+    )
 
     if task.shift_id:
         try:
