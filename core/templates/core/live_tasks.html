@@ -33,9 +33,9 @@
   <script>
     const tbody = document.querySelector("#taskTable tbody");
     const API_BASE = document.body.dataset.apiBase || "/tasks/";
+    const ALLOWED_STATUSES = new Set(["pending", "in_progress"]);
 
     function formatEmployee(person) {
-      // поддержка и {assigned_to:{...}}, и {employee:{...}}, и просто null
       const p = person ?? null;
       if (!p) return "-";
       const code = p.employee_code ?? p.code ?? "";
@@ -47,23 +47,20 @@
 
     function formatShift(shift) {
       if (shift == null) return "-";
-      // если пришёл числовой id
       if (typeof shift === "number" || typeof shift === "string") {
         return `#${shift}`;
       }
-      // если вложенный объект
       const id   = shift.id ?? "";
       const name = shift.name ?? "";
       const date = shift.date ?? "";
-      const labelParts = [];
-      if (id)   labelParts.push(`#${id}`);
-      if (name) labelParts.push(name);
-      if (date) labelParts.push(`(${date})`);
-      return labelParts.join(" ") || "-";
+      const parts = [];
+      if (id) parts.push(`#${id}`);
+      if (name) parts.push(name);
+      if (date) parts.push(`(${date})`);
+      return parts.join(" ") || "-";
     }
 
     function pickTitle(data) {
-      // поддержка разных имён поля: title/name
       return (data.title ?? data.name ?? "").toString().trim() || "-";
     }
 
@@ -78,16 +75,19 @@
     function upsertRow(data, source = "Auto") {
       const id = data.id ?? data.pk ?? null;
       if (id == null) return;
+      const status = data.status ?? "-";
+      if (!ALLOWED_STATUSES.has(status)) {
+        if (status === "completed") {
+          const row = getRow(String(id));
+          if (row) row.remove();
+        }
+        return;
+      }
 
       const title = pickTitle(data);
       const desc  = pickDescription(data);
-      const status = data.status ?? "-";
-
-      // сотрудник может приходить как assigned_to или employee
       const employeeObj = data.assigned_to ?? data.employee ?? null;
-
-      // смена может быть id или объектом
-      const shiftObj = data.shift ?? null;
+      const shiftObj    = data.shift ?? null;
 
       let row = getRow(id);
       const html = `
@@ -113,52 +113,47 @@
       row.innerHTML = html;
     }
 
-    // 1) Первичная загрузка активных задач
-    fetch(`${API_BASE}?status=in_progress`)
+    fetch(`${API_BASE}`)
       .then(r => r.json())
       .then(payload => {
         const items = Array.isArray(payload) ? payload : (payload.results || []);
-        items.forEach(task => upsertRow(task, "Auto"));
-        console.log("✅ Задачи загружены:", items.length);
+        items.filter(t => ALLOWED_STATUSES.has(t.status))
+             .forEach(task => upsertRow(task, "Auto"));
+        console.log("Задачи загружены:", items.length);
       })
-      .catch(error => console.error("❌ Ошибка API:", error));
+      .catch(error => console.error("Ошибка API:", error));
 
-    // 2) WebSocket + автопереподключение
     const WS_PATH = "/ws/tasks/";
     function connectWS() {
       const scheme = (location.protocol === "https:") ? "wss" : "ws";
       const socket = new WebSocket(`${scheme}://${location.host}${WS_PATH}`);
 
-      socket.onopen  = () => console.log("🔗 WebSocket соединён");
-      socket.onerror = (e) => console.error("⚠️ WebSocket ошибка:", e);
+      socket.onopen  = () => console.log("WebSocket соединён");
+      socket.onerror = (e) => console.error("WebSocket ошибка:", e);
       socket.onclose = () => {
-        console.warn("🔌 WebSocket закрыт. Повторное подключение через 2с…");
+        console.warn("WebSocket закрыт. Повторное подключение через 2с…");
         setTimeout(connectWS, 2000);
       };
 
       socket.onmessage = (event) => {
         let data;
         try { data = JSON.parse(event.data); }
-        catch (e) { console.error("❌ JSON ошибка:", e, event.data); return; }
+        catch (e) { console.error("JSON ошибка:", e, event.data); return; }
 
-        // Смена завершена → очистить таблицу
         if (data && data.reason === "смена завершена") {
           tbody.innerHTML = "";
-          console.log("🧹 Таблица очищена при завершении смены");
           return;
         }
 
-        // Конкретная задача завершена → убрать строку
-        if (data && data.reason === "завершено" && data.id != null) {
+        if ((data && data.reason === "завершено") || (data && data.status === "completed")) {
           const row = getRow(String(data.id));
           if (row) row.remove();
-          console.log(`🗑 Удалена задача #${data.id}`);
           return;
         }
 
-        // Любое обновление задачи → апсерт строки
-        if (data && (data.id != null)) {
-          upsertRow(data, "Auto");
+        if (data && data.id != null) {
+          if (!ALLOWED_STATUSES.has(data.status)) return;
+          upsertRow(data, "WS");
         }
       };
     }

@@ -97,7 +97,15 @@ class ShiftViewSet(viewsets.ReadOnlyModelViewSet):
 
 
 class TaskViewSet(viewsets.ModelViewSet):
-    queryset = Task.objects.all().order_by('-created_at')
+    queryset = Task.objects.all().order_by("-created_at")
+
+    # def get_queryset(self):
+    #     qs = super().get_queryset()
+    #     statuses = self.request.query_params.getlist("status")
+    #     if statuses:
+    #         return qs.filter(status__in=statuses)
+    #     return qs.exclude(status="completed")
+    
     serializer_class = TaskReadSerializer
     filterset_fields = ['status']
 

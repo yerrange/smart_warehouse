@@ -11,6 +11,7 @@ from core.models import (
     Cargo,
     CargoEvent,
 )
+from django.db import transaction
 from datetime import datetime
 
 # === Работники и смены ===
@@ -242,46 +243,18 @@ class CargoCreateSerializer(serializers.ModelSerializer):
             "current_slot_code",
         ]
 
-    def validate_current_slot_code(self, code: str):
-        if not code:
-            return code
-        if not LocationSlot.objects.filter(code=code).exists():
-            raise serializers.ValidationError("Слот с таким кодом не найден.")
-        return code
-
+    @transaction.atomic
     def create(self, validated_data):
-        slot_code = (validated_data.pop("current_slot_code", "") or "").strip()
         cargo = Cargo.objects.create(**validated_data)
-
-        if slot_code:
-            slot = LocationSlot.objects.get(code=slot_code)
-
-            # проверка занятости слота (reverse OneToOne удобно проверять запросом)
-            from core.models import Cargo as CargoModel
-            if CargoModel.objects.filter(current_slot=slot).exists():
-                raise serializers.ValidationError({"current_slot_code": "Этот слот уже занят другим грузом."})
-
-            cargo.current_slot = slot
-            cargo.status = "stored"
-            cargo.save(update_fields=["current_slot", "status", "updated_at"])
-
-            CargoEvent.objects.create(
-                cargo=cargo,
-                event_type="stored",
-                from_slot=None,
-                to_slot=slot,
-                quantity=0,
-                note="Создан и сразу размещён",
-            )
-        else:
-            CargoEvent.objects.create(
-                cargo=cargo,
-                event_type="arrived",
-                from_slot=None,
-                to_slot=None,
-                quantity=cargo.units or 0,
-                note="Создан (поступление)",
-            )
+        # Поступление: груз в пуле ожидания (нет слота)
+        CargoEvent.objects.create(
+            cargo=cargo,
+            event_type="arrived",
+            from_slot=None,
+            to_slot=None,
+            quantity=cargo.units or 0,
+            note="Создан (поступление)",
+        )
         return cargo
 
 
