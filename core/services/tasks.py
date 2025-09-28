@@ -31,11 +31,12 @@ def assign_task_to_best_employee(task: Task, shift: Shift | None):
         .filter(shift=shift, is_busy=False)
         .annotate(
             pending_assigned=Count(
-                "employee__tasks",
+                "employee__task",
                 filter=Q(
-                    employee__tasks__status="pending",
-                    employee__tasks__shift=shift,
-                )
+                    employee__task__status="pending",
+                    employee__task__shift=shift,
+                ),
+                distinct=True,
             )
         )
         .filter(pending_assigned=0)

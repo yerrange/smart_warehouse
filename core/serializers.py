@@ -101,6 +101,7 @@ class TaskReadSerializer(serializers.ModelSerializer):
             "difficulty",
             "cargo",
             "task_pool",
+            "source"
         ]
 
 
