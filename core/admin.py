@@ -1,6 +1,7 @@
 from django.contrib import admin
 from django import forms
 from django.core.exceptions import ValidationError
+from django.db import models
 import re
 
 from core.models import (
@@ -15,16 +16,15 @@ from core.models import (
     CargoEvent,
     StorageLocation,
     LocationSlot,
+    SKU,
 )
 
-# --- Вспомогательные inline'ы ---
-
+# --- Inlines ---
 
 class TaskInline(admin.TabularInline):
     model = Task
     extra = 0
-    fields = ("name", "status", "assigned_to", "shift", )
-    readonly_fields = ()
+    fields = ("name", "task_type", "status", "assigned_to", "shift")
     show_change_link = True
 
 
@@ -106,9 +106,13 @@ class ShiftAdmin(admin.ModelAdmin):
 
 @admin.register(EmployeeShiftStats)
 class EmployeeShiftStatsAdmin(admin.ModelAdmin):
-    list_display = ("employee", "shift", "shift__date", "task_count", "shift_score", "is_busy")
+    list_display = ("employee", "shift", "shift_date", "task_count", "shift_score", "is_busy")
     list_filter = ("shift", "is_busy")
     search_fields = ("shift__date", "employee__first_name", "employee__last_name", "employee__employee_code")
+
+    def shift_date(self, obj):
+        return obj.shift.date
+    shift_date.short_description = "Дата смены"
 
 
 # === StorageLocation & LocationSlot ===
@@ -130,27 +134,39 @@ class LocationSlotAdmin(admin.ModelAdmin):
     ordering = ("location__id", "index")
 
     def occupied(self, obj):
-        from core.models import Cargo
         return Cargo.objects.filter(current_slot=obj).exists()
     occupied.boolean = True
 
     def cargo_display(self, obj):
-        try:
-            return obj.cargo.cargo_code
-        except Cargo.DoesNotExist:
-            return "—"
+        cargo = Cargo.objects.filter(current_slot=obj).only("cargo_code").first()
+        return cargo.cargo_code if cargo else "—"
     cargo_display.short_description = "Cargo"
+
+
+# === SKU ===
+
+@admin.register(SKU)
+class SKUAdmin(admin.ModelAdmin):
+    list_display = ("code", "name", "unit_of_measurement", "is_active")
+    list_filter = ("is_active", "unit_of_measurement")
+    search_fields = ("code", "name")
+    ordering = ("code",)
 
 
 # === Cargo & CargoEvent ===
 
 @admin.register(Cargo)
 class CargoAdmin(admin.ModelAdmin):
-    list_display = ("cargo_code", "sku", "name", "container_type", "status", "slot_code", "location_code")
-    list_filter = ("status", "container_type")
-    search_fields = ("cargo_code", "sku", "name")
+    list_display = ("cargo_code", "sku_code", "sku_name_snapshot", "container_type", "status", "slot_code", "location_code")
+    list_filter = ("status", "container_type", "current_slot__location__location_type")
+    search_fields = ("cargo_code", "sku__code", "sku__name", "sku_name_snapshot")
     raw_id_fields = ("current_slot",)
+    autocomplete_fields = ("sku",)
     inlines = [CargoEventInline]
+
+    def sku_code(self, obj):
+        return obj.sku.code if obj.sku_id else "—"
+    sku_code.short_description = "SKU"
 
     def slot_code(self, obj):
         return obj.current_slot.code if obj.current_slot_id else "—"
@@ -165,16 +181,21 @@ class CargoAdmin(admin.ModelAdmin):
 class CargoEventAdmin(admin.ModelAdmin):
     list_display = ("cargo", "event_type", "timestamp", "from_slot", "to_slot", "quantity", "employee")
     list_filter = ("event_type", "timestamp")
-    search_fields = ("cargo__cargo_code", "cargo__name")
+    search_fields = (
+        "cargo__cargo_code",
+        "cargo__sku__code",
+        "cargo__sku__name",
+        "cargo__sku_name_snapshot",
+    )
 
 
 # === Task / TaskAssignmentLog / TaskPool ===
 
 @admin.register(Task)
 class TaskAdmin(admin.ModelAdmin):
-    list_display = ("id", "name", "status", "priority", "shift", "assigned_to", "difficulty")
-    list_filter = ("status", "shift", "task_pool")
-    search_fields = ("name", "description")
+    list_display = ("id", "name", "task_type", "status", "priority", "shift", "assigned_to", "difficulty", "cargo")
+    list_filter = ("status", "task_type", "shift", "task_pool")
+    search_fields = ("name", "description", "cargo__cargo_code")
     raw_id_fields = ("assigned_to", "cargo")
     autocomplete_fields = ("required_qualifications",)
 

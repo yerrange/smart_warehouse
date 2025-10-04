@@ -194,7 +194,7 @@ cython_debug/
 .cursorindexingignore
 
 # .draft
-# №draft
+# draft
 
 .staticfiles/
 staticfiles/

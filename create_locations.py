@@ -137,7 +137,7 @@ def main():
     total_slots_created = 0
 
     # 1) RECEIVING
-    rec = CONFIG["receiving"]
+    rec = CONFIG["inbound"]
     for i in range(1, rec["count"] + 1):
         code = f"IN-{i:02d}"
         created, slots = ensure_location_with_slots(

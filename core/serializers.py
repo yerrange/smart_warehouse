@@ -223,14 +223,18 @@ class LocationSlotShortSerializer(serializers.ModelSerializer):
 
 class CargoReadSerializer(serializers.ModelSerializer):
     current_slot = LocationSlotShortSerializer(read_only=True)
+    sku_code = serializers.CharField(source="sku.code", read_only=True)
+    sku_name = serializers.CharField(source="sku.name", read_only=True)
+    sku_name_snapshot = serializers.CharField(read_only=True)
 
     class Meta:
         model = Cargo
         fields = [
             "id",
             "cargo_code",
-            "sku",
-            "name",
+            "sku_code",
+            "sku_name",
+            "sku_name_snapshot",
             "container_type",
             "units",
             "weight_kg",
@@ -250,7 +254,6 @@ class CargoCreateSerializer(serializers.ModelSerializer):
         fields = [
             "cargo_code",
             "sku",
-            "name",
             "container_type",
             "units",
             "weight_kg",
@@ -259,10 +262,12 @@ class CargoCreateSerializer(serializers.ModelSerializer):
 
     @transaction.atomic
     def create(self, validated_data):
+        sku = validated_data["sku"]
+
         cargo = Cargo.objects.create(
             cargo_code=validated_data["cargo_code"],
-            sku=validated_data["sku"],
-            name=validated_data["name"],
+            sku=sku,
+            sku_name_snapshot=sku.name,
             container_type=validated_data["container_type"],
             units=validated_data["units"],
             status=Cargo.Status.CREATED,

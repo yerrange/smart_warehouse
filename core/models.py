@@ -337,7 +337,7 @@ class Cargo(models.Model):
         on_delete=models.PROTECT,
         related_name="cargos"
     )
-    name = models.CharField(max_length=200, blank=True)
+    sku_name_snapshot = models.CharField(max_length=255, blank=True)
     cargo_code = models.CharField(max_length=50, unique=True)
 
     class Container(models.TextChoices):
