@@ -562,7 +562,7 @@ class LocationSlot(models.Model):
         return self.code
 
 
-# === SKU - позиции товаров на складе ===
+# === SKU (Stock Keeping Unit) - позиции товаров на складе ===
 class SKU(models.Model):
     code = models.CharField(max_length=40, unique=True, db_index=True)
     name = models.CharField(max_length=255)
