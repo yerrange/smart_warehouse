@@ -262,7 +262,6 @@ def dispatch(
 
     from_slot = cargo.current_slot
 
-    # Финальные изменения
     # cargo.units = 0
     cargo.status = Cargo.Status.DISPATCHED
     cargo.current_slot = None

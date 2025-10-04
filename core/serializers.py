@@ -243,8 +243,7 @@ class CargoReadSerializer(serializers.ModelSerializer):
 
 
 class CargoCreateSerializer(serializers.ModelSerializer):
-    # можно сразу положить в слот по его коду
-    current_slot_code = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    # current_slot_code = serializers.CharField(write_only=True, required=False, allow_blank=True)
 
     class Meta:
         model = Cargo

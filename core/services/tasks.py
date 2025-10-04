@@ -1,3 +1,4 @@
+from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Count, Q
 from django.utils.timezone import now
@@ -152,9 +153,12 @@ def start_task(task: Task) -> bool:
         task.cargo.handling_state = Cargo.HandlingState.PROCESSING
         task.cargo.save(update_fields=["handling_state", "updated_at"])
 
-    stats = task.shift.employee_stats.get(employee=task.assigned_to)
-    stats.is_busy = True
-    stats.save(update_fields=["is_busy"])
+    try:
+        stats = task.shift.employee_stats.get(employee=task.assigned_to)
+        stats.is_busy = True
+        stats.save(update_fields=["is_busy"])
+    except EmployeeShiftStats.DoesNotExist:
+        raise ValidationError("Для сотрудника не инициализирована статистика смены")
 
     channel_layer = get_channel_layer()
     async_to_sync(channel_layer.group_send)(
@@ -175,7 +179,11 @@ def complete_task(task: Task) -> bool:
             payload = task.payload or {}
             employee_code = getattr(task.assigned_to, "employee_code", None)
 
-            if task.task_type in (Task.TaskType.RECEIVE_TO_INBOUND, Task.TaskType.PUTAWAY_TO_RACK, Task.TaskType.MOVE_BETWEEN_SLOTS):
+            if task.task_type in (
+                Task.TaskType.RECEIVE_TO_INBOUND,
+                Task.TaskType.PUTAWAY_TO_RACK,
+                Task.TaskType.MOVE_BETWEEN_SLOTS
+            ):
                 to_slot = payload.get("to_slot_code")
                 operation(task.cargo.cargo_code, to_slot, employee_code, payload.get("note"))
             elif task.task_type == Task.TaskType.DISPATCH_CARGO:

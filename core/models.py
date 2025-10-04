@@ -332,7 +332,11 @@ class TaskPool(models.Model):
 # === Грузы ===
 class Cargo(models.Model):
     # ассортимент/идентификация
-    sku = models.CharField(max_length=64, db_index=True)
+    sku = models.ForeignKey(
+        "SKU",
+        on_delete=models.PROTECT,
+        related_name="cargos"
+    )
     name = models.CharField(max_length=200, blank=True)
     cargo_code = models.CharField(max_length=50, unique=True)
 
@@ -556,6 +560,19 @@ class LocationSlot(models.Model):
 
     def __str__(self):
         return self.code
+
+
+# === SKU - позиции товаров на складе ===
+class SKU(models.Model):
+    code = models.CharField(max_length=40, unique=True, db_index=True)
+    name = models.CharField(max_length=255)
+    unit_of_measurement = models.CharField(max_length=16, default="pcs")  # единица измерения
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):  # удобнее в админке
+        return f"{self.code} — {self.name}"
 
 
 # ===== Конец блока "Грузы" =====
