@@ -421,7 +421,7 @@ class Cargo(models.Model):
 
     def __str__(self):
         where = self.current_slot.code if self.current_slot_id else '—'
-        return f"{self.cargo_code} ({self.get_status_display()} @ {where})"
+        return f"{self.cargo_code}"
 
 
 
@@ -498,7 +498,6 @@ class StorageLocation(models.Model):
         default=LocationType.RACK
     )
 
-    # Примитивная адресация (полезна для генератора ячеек и фильтров)
     zone = models.CharField(max_length=16, blank=True)
     aisle = models.CharField(max_length=16, blank=True)
     rack = models.CharField(max_length=16, blank=True)

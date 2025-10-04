@@ -79,7 +79,7 @@ class ShiftEmployeeUpdateSerializer(serializers.Serializer):
 class CargoShortSerializer(serializers.ModelSerializer):
     class Meta:
         model = Cargo
-        fields = ["cargo_code", "name"]
+        fields = ["cargo_code", "sku_name_snapshot"]
 
 
 class TaskReadSerializer(serializers.ModelSerializer):
@@ -110,28 +110,27 @@ class TaskCreateSerializer(serializers.ModelSerializer):
     required_qualification_codes = serializers.ListField(
         child=serializers.CharField(), write_only=True, required=False
     )
-    assigned_employee_code = serializers.CharField(required=False, write_only=True)
     cargo_code = serializers.CharField(required=False, allow_null=True, write_only=True)
+    task_type = serializers.ChoiceField(choices=Task.TaskType.choices, required=True)
+    payload = serializers.JSONField(required=False, default=dict)
 
     class Meta:
         model = Task
         fields = [
             "name",
             "description",
-            "shift",
             "difficulty",
             "priority",
             "required_qualification_codes",
-            "assigned_employee_code",
             "cargo_code",
             "task_type",
             "payload"
         ]
 
     def validate(self, data):
-        shift = data.get("shift")
-        if not shift or not getattr(shift, "is_active", False):
-            raise serializers.ValidationError("Смена не найдена или неактивна.")
+        # shift = data.get("shift")
+        # if not shift or not getattr(shift, "is_active", False):
+        #     raise serializers.ValidationError("Смена не найдена или неактивна.")
 
         task_type = data.get("task_type")
         payload = data.get("payload") or {}
@@ -162,6 +161,9 @@ class TaskCreateSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({"cargo_code": "Груз не найден"})
             validated_data["cargo"] = cargo
 
+        validated_data.pop("assigned_to", None)
+        validated_data.pop("shift", None)
+
         task = Task.objects.create(**validated_data)
 
         if qualification_codes:
@@ -191,7 +193,8 @@ class TaskAssignmentLogSerializer(serializers.ModelSerializer):
 class TaskPoolSerializer(serializers.ModelSerializer):
     class Meta:
         model = TaskPool
-        fields = ["id", "name"]
+        fields = ["id", "name", "is_active", "auto_assign_enabled", "default_priority", "created_at", "updated_at"]
+        read_only_fields = ["created_at", "updated_at"]
 
 
 # === Склад: локации, слоты, грузы, события ===

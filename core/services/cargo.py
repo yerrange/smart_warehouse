@@ -265,7 +265,8 @@ def dispatch(
     # cargo.units = 0
     cargo.status = Cargo.Status.DISPATCHED
     cargo.current_slot = None
-    cargo.save(update_fields=["status", "current_slot", "updated_at"])
+    cargo.handling_state = Cargo.HandlingState.IDLE
+    cargo.save(update_fields=["status", "current_slot", "handling_state", "updated_at"])
 
     event = CargoEvent.objects.create(
         cargo=cargo,

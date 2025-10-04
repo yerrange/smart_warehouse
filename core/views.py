@@ -168,6 +168,7 @@ class TaskPoolViewSet(viewsets.ReadOnlyModelViewSet):
     GET /api/task-pools/<pk>/tasks/ — вернуть задачи пула (без финальных статусов).
     """
     queryset = TaskPool.objects.all()
+    serializer_class = TaskPoolSerializer
     # ВАЖНО: используем стандартный lookup по PK, чтобы не зависеть от наличия поля 'code'
     # (URL будет /api/task-pools/<pk>/tasks/)
 

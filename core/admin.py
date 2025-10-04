@@ -157,7 +157,7 @@ class SKUAdmin(admin.ModelAdmin):
 
 @admin.register(Cargo)
 class CargoAdmin(admin.ModelAdmin):
-    list_display = ("cargo_code", "sku_code", "sku_name_snapshot", "container_type", "status", "slot_code", "location_code")
+    list_display = ("cargo_code", "sku_code", "sku_name_snapshot", "container_type", "status", "location_code", "slot_code")
     list_filter = ("status", "container_type", "current_slot__location__location_type")
     search_fields = ("cargo_code", "sku__code", "sku__name", "sku_name_snapshot")
     raw_id_fields = ("current_slot",)
