@@ -15,7 +15,7 @@ from core.models import StorageLocation, LocationSlot
 
 CONFIG = {
     # Приёмка: несколько доков, по 2 слота паллетного размера
-    "receiving": {
+    "inbound": {
         "count": 2,              # REC-01..REC-02
         "slot_count": 10,
         "slot_size": StorageLocation.SlotSize.PALLET,
@@ -139,13 +139,13 @@ def main():
     # 1) RECEIVING
     rec = CONFIG["receiving"]
     for i in range(1, rec["count"] + 1):
-        code = f"REC-{i:02d}"
+        code = f"IN-{i:02d}"
         created, slots = ensure_location_with_slots(
             code=code,
-            location_type=StorageLocation.LocationType.RECEIVING,
+            location_type=StorageLocation.LocationType.INBOUND,
             slot_count=rec["slot_count"],
             slot_size_class=rec["slot_size"],
-            zone="REC",
+            zone="IN",
         )
         total_locations_created += int(created)
         total_slots_created += slots

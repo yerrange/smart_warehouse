@@ -1,5 +1,3 @@
-# === core/views.py (thin controllers, only orchestration & HTTP) ===
-
 from django.shortcuts import render
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
@@ -29,6 +27,11 @@ from core.serializers import (
     # cargo
     CargoReadSerializer,
     CargoCreateSerializer,
+    CargoArriveSerializer,
+    CargoStoreSerializer,
+    CargoMoveSerializer,
+    CargoDispatchSerializer,
+    CargoEventSerializer
 )
 
 # Import service layer (existing files: core/shifts.py, core/tasks.py)
@@ -167,6 +170,7 @@ class TaskPoolViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = TaskPool.objects.all()
     # ВАЖНО: используем стандартный lookup по PK, чтобы не зависеть от наличия поля 'code'
     # (URL будет /api/task-pools/<pk>/tasks/)
+
     @action(detail=True, methods=["get"], url_path="tasks")
     def tasks(self, request, pk=None):
         pool: TaskPool = self.get_object()
@@ -181,11 +185,52 @@ class TaskPoolViewSet(viewsets.ReadOnlyModelViewSet):
 class CargoViewSet(viewsets.ModelViewSet):
     queryset = Cargo.objects.all()
     serializer_class = CargoReadSerializer
+    lookup_field = "cargo_code"
+    lookup_value_regex = "[^/]+"
 
     def get_serializer_class(self):
-        if self.action in ("create",):
-            return CargoCreateSerializer
-        return CargoReadSerializer
+        return CargoCreateSerializer if self.action == "create" else CargoReadSerializer
+
+    def _get_cargo(self):
+        return Cargo.objects.get(cargo_code=self.kwargs[self.lookup_field])
+    
+    @action(detail=True, methods=["post"])
+    def arrive(self, request, *args, **kwargs):
+        cargo = self._get_cargo()
+        ser = CargoArriveSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        event = ser.save(cargo=cargo)
+        return Response(CargoEventSerializer(event).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"])
+    def store(self, request, *args, **kwargs):
+        cargo = self._get_cargo()
+        ser = CargoStoreSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        event = ser.save(cargo=cargo)
+        return Response(CargoEventSerializer(event).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"])
+    def move(self, request, *args, **kwargs):
+        cargo = self._get_cargo()
+        ser = CargoMoveSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        event = ser.save(cargo=cargo)
+        return Response(CargoEventSerializer(event).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"])
+    def dispatch(self, request, *args, **kwargs):
+        cargo = self._get_cargo()
+        ser = CargoDispatchSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        event = ser.save(cargo=cargo)
+        return Response(CargoEventSerializer(event).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["get"])
+    def events(self, request, *args, **kwargs):
+        cargo = self._get_cargo()
+        qs = cargo.events.order_by("-timestamp","id")
+        return Response(CargoEventSerializer(qs, many=True).data)
 
 
 class EmployeeViewSet(viewsets.ModelViewSet):

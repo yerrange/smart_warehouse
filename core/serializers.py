@@ -13,6 +13,7 @@ from core.models import (
 )
 from django.db import transaction
 from datetime import datetime
+from core.services import cargo as cargo_service
 
 # === Работники и смены ===
 
@@ -123,12 +124,26 @@ class TaskCreateSerializer(serializers.ModelSerializer):
             "required_qualification_codes",
             "assigned_employee_code",
             "cargo_code",
+            "task_type",
+            "payload"
         ]
 
     def validate(self, data):
         shift = data.get("shift")
-        if not shift or not shift.is_active:
+        if not shift or not getattr(shift, "is_active", False):
             raise serializers.ValidationError("Смена не найдена или неактивна.")
+
+        task_type = data.get("task_type")
+        payload = data.get("payload") or {}
+
+        SLOT_IS_REQUIRED = {
+            Task.TaskType.RECEIVE_TO_INBOUND,
+            Task.TaskType.PUTAWAY_TO_RACK,
+            Task.TaskType.MOVE_BETWEEN_SLOTS,
+        }
+        if task_type in SLOT_IS_REQUIRED and not payload.get("to_slot_code"):
+            raise serializers.ValidationError({"payload": "Поле 'to_slot_code' обязательно для этого типа задачи."})
+
         return data
 
     def create(self, validated_data):
@@ -136,8 +151,16 @@ class TaskCreateSerializer(serializers.ModelSerializer):
         employee_code = validated_data.pop("assigned_employee_code", None)
         cargo_code = validated_data.pop("cargo_code", None)
 
-        pool, _ = TaskPool.objects.get_or_create(name="Общий пул")
-        validated_data["task_pool"] = pool
+        if not validated_data.get("task_pool"):
+            pool, _ = TaskPool.objects.get_or_create(name="Общий пул")
+            validated_data["task_pool"] = pool
+
+        if cargo_code:
+            try:
+                cargo = Cargo.objects.get(cargo_code=cargo_code)
+            except Cargo.DoesNotExist:
+                raise serializers.ValidationError({"cargo_code": "Груз не найден"})
+            validated_data["cargo"] = cargo
 
         task = Task.objects.create(**validated_data)
 
@@ -152,14 +175,6 @@ class TaskCreateSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({"assigned_employee_code": "Сотрудник не найден"})
             task.assigned_to = employee
             task.save(update_fields=["assigned_to"])
-
-        if cargo_code:
-            try:
-                cargo = Cargo.objects.get(cargo_code=cargo_code)
-            except Cargo.DoesNotExist:
-                raise serializers.ValidationError({"cargo_code": "Груз не найден"})
-            task.cargo = cargo
-            task.save(update_fields=["cargo"])
 
         return task
 
@@ -241,22 +256,77 @@ class CargoCreateSerializer(serializers.ModelSerializer):
             "units",
             "weight_kg",
             "volume_m3",
-            "current_slot_code",
         ]
 
     @transaction.atomic
     def create(self, validated_data):
-        cargo = Cargo.objects.create(**validated_data)
-        # Поступление: груз в пуле ожидания (нет слота)
+        cargo = Cargo.objects.create(
+            cargo_code=validated_data["cargo_code"],
+            sku=validated_data["sku"],
+            name=validated_data["name"],
+            container_type=validated_data["container_type"],
+            units=validated_data["units"],
+            status=Cargo.Status.CREATED,
+            handling_state=Cargo.HandlingState.IDLE,
+        )
+
         CargoEvent.objects.create(
             cargo=cargo,
-            event_type="arrived",
+            event_type="created",
             from_slot=None,
             to_slot=None,
             quantity=cargo.units or 0,
-            note="Создан (поступление)",
+            note="Груз создан",
         )
         return cargo
+
+
+class CargoArriveSerializer(serializers.Serializer):
+    to_slot_code = serializers.CharField()
+    employee_code = serializers.CharField(required=False, allow_blank=True)
+
+    def save(self, *, cargo):
+        return cargo_service.arrive(
+            cargo.cargo_code,
+            self.validated_data["to_slot_code"],
+            self.validated_data.get("employee_code")
+        )
+
+
+class CargoStoreSerializer(serializers.Serializer):
+    to_slot_code = serializers.CharField()
+    employee_code = serializers.CharField(required=False, allow_blank=True)
+
+    def save(self, *, cargo):
+        return cargo_service.store(
+            cargo.cargo_code,
+            self.validated_data["to_slot_code"],
+            self.validated_data.get("employee_code")
+        )
+
+
+class CargoMoveSerializer(serializers.Serializer):
+    to_slot_code = serializers.CharField()
+    employee_code = serializers.CharField(required=False, allow_blank=True)
+
+    def save(self, *, cargo):
+        return cargo_service.move(
+            cargo.cargo_code,
+            self.validated_data["to_slot_code"],
+            self.validated_data.get("employee_code")
+        )
+
+
+class CargoDispatchSerializer(serializers.Serializer):
+    employee_code = serializers.CharField(required=False, allow_blank=True)
+    note = serializers.CharField(required=False, allow_blank=True)
+
+    def save(self, *, cargo):
+        return cargo_service.dispatch(
+            cargo.cargo_code,
+            self.validated_data.get("employee_code"),
+            self.validated_data.get("note")
+        )
 
 
 class CargoEventSerializer(serializers.ModelSerializer):

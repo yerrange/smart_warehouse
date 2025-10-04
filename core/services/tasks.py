@@ -5,8 +5,24 @@ from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 from rest_framework.exceptions import NotFound
 
-from core.models import Task, Employee, EmployeeShiftStats, TaskAssignmentLog, Shift
+from core.models import (
+    Task,
+    Employee,
+    EmployeeShiftStats,
+    TaskAssignmentLog,
+    Shift,
+    Cargo
+)
 from core.serializers import TaskReadSerializer
+from core.services import cargo as cargo_service
+
+
+FUNC_TO_CALL = {
+    Task.TaskType.RECEIVE_TO_INBOUND: cargo_service.arrive,
+    Task.TaskType.PUTAWAY_TO_RACK: cargo_service.store,
+    Task.TaskType.MOVE_BETWEEN_SLOTS: cargo_service.move,
+    Task.TaskType.DISPATCH_CARGO: cargo_service.dispatch,
+}
 
 
 def employee_has_all_qualifications(employee: Employee, task: Task) -> bool:
@@ -123,9 +139,47 @@ def assign_task_manually(task: Task, employee_code: str) -> None:
 
 
 @transaction.atomic
+def start_task(task: Task) -> bool:
+    if task.status != "pending" or not task.assigned_to:
+        return False
+
+    task.status = "in_progress"
+    task.started_at = now()
+    task.save(update_fields=["status", "started_at", "updated_at"])
+
+    # task.cargo_id, а не task.cargo.id - быстрее и не нагружает БД
+    if task.cargo_id and task.cargo.handling_state != Cargo.HandlingState.PROCESSING:
+        task.cargo.handling_state = Cargo.HandlingState.PROCESSING
+        task.cargo.save(update_fields=["handling_state", "updated_at"])
+
+    stats = task.shift.employee_stats.get(employee=task.assigned_to)
+    stats.is_busy = True
+    stats.save(update_fields=["is_busy"])
+
+    channel_layer = get_channel_layer()
+    async_to_sync(channel_layer.group_send)(
+        "task_updates",
+        {"type": "task_started", "message": TaskReadSerializer(task).data},
+    )
+    return True
+
+
+@transaction.atomic
 def complete_task(task: Task) -> bool:
     if task.status != "in_progress" or not task.assigned_to:
         return False
+
+    if task.cargo_id and task.task_type:
+        operation = FUNC_TO_CALL.get(task.task_type)
+        if operation:
+            payload = task.payload or {}
+            employee_code = getattr(task.assigned_to, "employee_code", None)
+
+            if task.task_type in (Task.TaskType.RECEIVE_TO_INBOUND, Task.TaskType.PUTAWAY_TO_RACK, Task.TaskType.MOVE_BETWEEN_SLOTS):
+                to_slot = payload.get("to_slot_code")
+                operation(task.cargo.cargo_code, to_slot, employee_code, payload.get("note"))
+            elif task.task_type == Task.TaskType.DISPATCH_CARGO:
+                operation(task.cargo.cargo_code, employee_code, payload.get("note"))
 
     task.status = "completed"
     task.completed_at = now()
@@ -138,6 +192,12 @@ def complete_task(task: Task) -> bool:
             "task_pool"
         ]
     )
+
+    if task.cargo_id:
+        has_active = task.cargo.task_set.filter(status__in=["in_progress", "paused"]).exists()
+        if not has_active and task.cargo.handling_state != Cargo.HandlingState.IDLE:
+            task.cargo.handling_state = Cargo.HandlingState.IDLE
+            task.cargo.save(update_fields=["handling_state", "updated_at"])
 
     if task.shift_id:
         try:
@@ -152,26 +212,5 @@ def complete_task(task: Task) -> bool:
     async_to_sync(channel_layer.group_send)(
         "task_updates",
         {"type": "task_completed", "message": TaskReadSerializer(task).data},
-    )
-    return True
-
-
-@transaction.atomic
-def start_task(task: Task) -> bool:
-    if task.status != "pending" or not task.assigned_to:
-        return False
-
-    task.status = "in_progress"
-    task.started_at = now()
-    task.save(update_fields=["status", "started_at", "updated_at"])
-
-    stats = task.shift.employee_stats.get(employee=task.assigned_to)
-    stats.is_busy = True
-    stats.save(update_fields=["is_busy"])
-
-    channel_layer = get_channel_layer()
-    async_to_sync(channel_layer.group_send)(
-        "task_updates",
-        {"type": "task_started", "message": TaskReadSerializer(task).data},
     )
     return True

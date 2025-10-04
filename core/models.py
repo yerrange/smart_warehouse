@@ -160,225 +160,18 @@ class EmployeeShiftStats(models.Model):
 
 
 
-# ===== Начало блока "Грузы"
-
-
-# === Грузы ===
-class Cargo(models.Model):
-    # ассортимент/идентификация
-    sku = models.CharField(max_length=64, db_index=True)
-    name = models.CharField(max_length=200, blank=True)
-    cargo_code = models.CharField(max_length=50, unique=True)
-
-    class Container(models.TextChoices):
-        PALLET = 'pallet', 'Паллет'
-        CRATE = 'crate', 'Ящик'
-        DRUM = 'drum', 'Бочка'
-        BOX = 'box', 'Коробка'
-        TOTE = 'tote', 'Сумка'
-
-    container_type = models.CharField(
-        max_length=16,
-        choices=Container.choices,
-        default=Container.PALLET
-    )
-
-    units = models.PositiveIntegerField(default=1)
-    weight_kg = models.FloatField(default=0)
-    volume_m3 = models.FloatField(default=0)
-
-    class Status(models.TextChoices):
-        ARRIVED = 'arrived', 'Поступил'
-        STORED = 'stored', 'Размещён'
-        PROCESSING = 'processing', 'Обработка'
-        DISPATCHED = 'dispatched', 'Отгружен'
-
-    status = models.CharField(
-        max_length=16,
-        choices=Status.choices,
-        default=Status.ARRIVED,
-        db_index=True
-    )
-
-    current_slot = models.OneToOneField(
-        'LocationSlot', null=True, blank=True, on_delete=models.SET_NULL,
-        related_name='cargo', db_index=True
-    )
-
-    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        indexes = [
-            models.Index(fields=['status','current_slot']),
-            models.Index(fields=['sku']),
-        ]
-        constraints = [
-            # Отгруженный груз не должен занимать слот
-            models.CheckConstraint(
-                check=~Q(status='dispatched') | Q(current_slot__isnull=True),
-                name='cargo_dispatched_without_slot'
-            ),
-        ]
-
-    # Удобный shortcut: получить локацию через слот
-    @property
-    def current_location(self):
-        return self.current_slot.location if self.current_slot_id else None
-
-    def __str__(self):
-        where = self.current_slot.code if self.current_slot_id else '—'
-        return f"{self.cargo_code} ({self.get_status_display()} @ {where})"
-
-
-
-# === История работы с грузом ===
-class CargoEvent(models.Model):
-    class EventType(models.TextChoices):
-        ARRIVED = 'arrived', 'Поступление'
-        STORED = 'stored', 'Размещение'
-        MOVED = 'moved', 'Перемещение'
-        PICKED = 'picked', 'Отбор'
-        DISPATCHED = 'dispatched', 'Отгрузка'
-        QC = 'qc', 'Контроль'
-        NOTE = 'note', 'Заметка'
-
-    cargo = models.ForeignKey(
-        'Cargo',
-        on_delete=models.CASCADE,
-        related_name='events',
-        db_index=True
-    )
-    event_type = models.CharField(max_length=16, choices=EventType.choices)
-    timestamp = models.DateTimeField(auto_now_add=True, db_index=True)
-
-    from_slot = models.ForeignKey(
-        'LocationSlot',
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-        related_name='events_from'
-    )
-    to_slot = models.ForeignKey(
-        'LocationSlot',
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-        related_name='events_to'
-    )
-
-    employee = models.ForeignKey(
-        'Employee',
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL
-    )
-    quantity = models.PositiveIntegerField(default=0)
-    note = models.TextField(blank=True)
-
-    class Meta:
-        ordering = ['-timestamp', 'id']
-        indexes = [
-            models.Index(fields=['event_type', 'timestamp']),
-            models.Index(fields=['cargo', 'timestamp']),
-        ]
-
-    def __str__(self):
-        return f"[{self.timestamp:%Y-%m-%d %H:%M}] {self.cargo.cargo_code}: {self.get_event_type_display()}"
-
-
-# === Ячейки хранения ===
-class StorageLocation(models.Model):
-    class LocationType(models.TextChoices):
-        RECEIVING = 'receiving', _('Receiving dock')  # зона приемки
-        STAGING = 'staging', _('Staging area')        # буфер
-        RACK = 'rack', _('Rack/bin')                  # стеллаж/ячейка
-        PICK_FACE = 'pick', _('Pick face')            # отборочная зона
-        OUTBOUND = 'outbound', _('Outbound dock')     # отгрузка
-        QC = 'qc', _('Quality control')               # контроль качества
-
-    code = models.CharField(max_length=64, unique=True)  # Человеческий/сканируемый код ячейки, например Z1-A02-R03-S1-B05
-    location_type = models.CharField(
-        max_length=16,
-        choices=LocationType.choices,
-        default=LocationType.RACK
-    )
-
-    # Примитивная адресация (полезна для генератора ячеек и фильтров)
-    zone = models.CharField(max_length=16, blank=True)
-    aisle = models.CharField(max_length=16, blank=True)
-    rack = models.CharField(max_length=16, blank=True)
-    shelf = models.CharField(max_length=16, blank=True)
-    bin = models.CharField(max_length=16, blank=True)
-
-    class SlotSize(models.TextChoices):
-        PALLET = 'pallet', _('Pallet-size')
-        CRATE = 'crate', _('Crate-size')
-        DRUM = 'drum', _('Drum-size')
-        BOX = 'box', _('Box-size')
-        TOTE = 'tote', _('Tote-size')
-
-    slot_count = models.PositiveSmallIntegerField(default=1)
-    slot_size_class = models.CharField(
-        max_length=16,
-        choices=SlotSize.choices,
-        default=SlotSize.PALLET
-    )
-
-    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        ordering = ['zone', 'aisle', 'rack', 'shelf', 'bin', 'code']
-        indexes = [
-            models.Index(fields=['location_type']),
-            models.Index(fields=['zone', 'aisle', 'rack']),
-        ]
-
-    def __str__(self):
-        return self.code
-
-
-# === Слоты ячеек ===
-class LocationSlot(models.Model):
-    location = models.ForeignKey(
-        'StorageLocation',
-        on_delete=models.CASCADE,
-        related_name='slots',
-        db_index=True
-    )
-    index = models.PositiveSmallIntegerField(help_text="Порядковый номер слота внутри локации (1..slot_count)")
-    code = models.CharField(max_length=80, unique=True)  # например: "{location.code}-#1"
-    size_class = models.CharField(
-        max_length=16,
-        choices=StorageLocation.SlotSize.choices
-    )
-
-    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        unique_together = (('location', 'index'),)
-        ordering = ['location_id', 'index']
-        indexes = [
-            models.Index(fields=['location', 'index']),
-        ]
-
-    def __str__(self):
-        return self.code
-
-
-# ===== Конец блока "Грузы" =====
-
-
-
-
-
 # ===== Начало блока "Задачи" =====
 
 
 # === Задачи ===
 class Task(models.Model):
+
+    class TaskType(models.TextChoices):
+        RECEIVE_TO_INBOUND = "RECEIVE_TO_INBOUND", _("Receive to inbound")   # → cargo.arrive
+        PUTAWAY_TO_RACK = "PUTAWAY_TO_RACK", _("Putaway to rack")            # → cargo.store
+        MOVE_BETWEEN_SLOTS = "MOVE_BETWEEN_SLOTS", _("Move between slots")   # → cargo.move
+        DISPATCH_CARGO = "DISPATCH_CARGO", _("Dispatch cargo")               # → cargo.dispatch
+
     class Status(models.TextChoices):
         PENDING = "pending", _("Pending")
         IN_PROGRESS = "in_progress", _("In progress")
@@ -389,6 +182,13 @@ class Task(models.Model):
 
     name = models.CharField(max_length=120)
     description = models.TextField()
+
+    task_type = models.CharField(
+        max_length=40,
+        choices=TaskType.choices,
+        db_index=True,
+    )
+    payload = models.JSONField(default=dict, blank=True)
 
     status = models.CharField(
         max_length=20,
@@ -521,3 +321,241 @@ class TaskPool(models.Model):
 
 
 # =====  Конец блока "Задачи" =====
+
+
+
+
+
+# ===== Начало блока "Грузы"
+
+
+# === Грузы ===
+class Cargo(models.Model):
+    # ассортимент/идентификация
+    sku = models.CharField(max_length=64, db_index=True)
+    name = models.CharField(max_length=200, blank=True)
+    cargo_code = models.CharField(max_length=50, unique=True)
+
+    class Container(models.TextChoices):
+        PALLET = 'pallet', 'Паллет'
+        CRATE = 'crate', 'Ящик'
+        DRUM = 'drum', 'Бочка'
+        BOX = 'box', 'Коробка'
+        TOTE = 'tote', 'Сумка'
+
+    container_type = models.CharField(
+        max_length=16,
+        choices=Container.choices,
+        default=Container.PALLET
+    )
+
+    units = models.PositiveIntegerField(default=1)
+    weight_kg = models.FloatField(default=0)
+    volume_m3 = models.FloatField(default=0)
+
+    class Status(models.TextChoices):
+        CREATED = 'created', 'Создан'
+        ARRIVED = 'arrived', 'Поступил'
+        STORED = 'stored', 'Размещён'
+        DISPATCHED = 'dispatched', 'Отгружен'
+
+    class HandlingState(models.TextChoices):
+        IDLE = 'idle', 'Ожидает'
+        PROCESSING = 'processing', 'Обрабатывается'
+
+    status = models.CharField(
+        max_length=16,
+        choices=Status.choices,
+        default=Status.CREATED,
+        db_index=True
+    )
+
+    handling_state = models.CharField(
+        max_length=16,
+        choices=HandlingState.choices,
+        default=HandlingState.IDLE,
+        db_index=True,
+    )
+
+    current_slot = models.OneToOneField(
+        'LocationSlot', null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='cargo', db_index=True
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['status','current_slot']),
+            models.Index(fields=['sku']),
+        ]
+        constraints = [
+            # Отгруженный груз не должен занимать слот
+            models.CheckConstraint(
+                check=~Q(status='dispatched') | Q(current_slot__isnull=True),
+                name='cargo_dispatched_without_slot'
+            ),
+            models.CheckConstraint(
+                name="cargo_created_requires_no_slot",
+                check=Q(status="created", current_slot__isnull=True) | ~Q(status="created"),
+            ),
+            models.CheckConstraint(
+                name="cargo_dispatched_handling_is_idle",
+                check=Q(status="dispatched", handling_state="idle") | ~Q(status="dispatched"),
+            ),
+        ]
+
+    # Удобный shortcut: получить локацию через слот
+    @property
+    def current_location(self):
+        return self.current_slot.location if self.current_slot_id else None
+
+    @property
+    def is_processing(self) -> bool:
+        return self.handling_state != self.HandlingState.IDLE
+
+    def __str__(self):
+        where = self.current_slot.code if self.current_slot_id else '—'
+        return f"{self.cargo_code} ({self.get_status_display()} @ {where})"
+
+
+
+# === История работы с грузом ===
+class CargoEvent(models.Model):
+    class EventType(models.TextChoices):
+        CREATED = 'created', 'Создание'
+        ARRIVED = 'arrived', 'Поступление'
+        STORED = 'stored', 'Размещение'
+        MOVED = 'moved', 'Перемещение'
+        PICKED = 'picked', 'Отбор'
+        DISPATCHED = 'dispatched', 'Отгрузка'
+        QC = 'qc', 'Контроль'
+        NOTE = 'note', 'Заметка'
+
+    cargo = models.ForeignKey(
+        'Cargo',
+        on_delete=models.CASCADE,
+        related_name='events',
+        db_index=True
+    )
+    event_type = models.CharField(max_length=16, choices=EventType.choices)
+    timestamp = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    from_slot = models.ForeignKey(
+        'LocationSlot',
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='events_from'
+    )
+    to_slot = models.ForeignKey(
+        'LocationSlot',
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='events_to'
+    )
+
+    employee = models.ForeignKey(
+        'Employee',
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL
+    )
+    quantity = models.PositiveIntegerField(default=0)
+    note = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ['-timestamp', 'id']
+        indexes = [
+            models.Index(fields=['event_type', 'timestamp']),
+            models.Index(fields=['cargo', 'timestamp']),
+        ]
+
+    def __str__(self):
+        return f"[{self.timestamp:%Y-%m-%d %H:%M}] {self.cargo.cargo_code}: {self.get_event_type_display()}"
+
+
+# === Ячейки хранения ===
+class StorageLocation(models.Model):
+    class LocationType(models.TextChoices):
+        INBOUND = 'inbound', _('Inbound dock')        # зона приемки
+        STAGING = 'staging', _('Staging area')        # буфер
+        RACK = 'rack', _('Rack/bin')                  # стеллаж/ячейка
+        PICK_FACE = 'pick', _('Pick face')            # отборочная зона
+        OUTBOUND = 'outbound', _('Outbound dock')     # отгрузка
+        QC = 'qc', _('Quality control')               # контроль качества
+
+    code = models.CharField(max_length=64, unique=True)  # Человеческий/сканируемый код ячейки, например Z1-A02-R03-S1-B05
+    location_type = models.CharField(
+        max_length=16,
+        choices=LocationType.choices,
+        default=LocationType.RACK
+    )
+
+    # Примитивная адресация (полезна для генератора ячеек и фильтров)
+    zone = models.CharField(max_length=16, blank=True)
+    aisle = models.CharField(max_length=16, blank=True)
+    rack = models.CharField(max_length=16, blank=True)
+    shelf = models.CharField(max_length=16, blank=True)
+    bin = models.CharField(max_length=16, blank=True)
+
+    class SlotSize(models.TextChoices):
+        PALLET = 'pallet', _('Pallet-size')
+        CRATE = 'crate', _('Crate-size')
+        DRUM = 'drum', _('Drum-size')
+        BOX = 'box', _('Box-size')
+        TOTE = 'tote', _('Tote-size')
+
+    slot_count = models.PositiveSmallIntegerField(default=1)
+    slot_size_class = models.CharField(
+        max_length=16,
+        choices=SlotSize.choices,
+        default=SlotSize.PALLET
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['zone', 'aisle', 'rack', 'shelf', 'bin', 'code']
+        indexes = [
+            models.Index(fields=['location_type']),
+            models.Index(fields=['zone', 'aisle', 'rack']),
+        ]
+
+    def __str__(self):
+        return self.code
+
+
+# === Слоты ячеек ===
+class LocationSlot(models.Model):
+    location = models.ForeignKey(
+        'StorageLocation',
+        on_delete=models.CASCADE,
+        related_name='slots',
+        db_index=True
+    )
+    index = models.PositiveSmallIntegerField(help_text="Порядковый номер слота внутри локации (1..slot_count)")
+    code = models.CharField(max_length=80, unique=True)  # например: "{location.code}-#1"
+    size_class = models.CharField(
+        max_length=16,
+        choices=StorageLocation.SlotSize.choices
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = (('location', 'index'),)
+        ordering = ['location_id', 'index']
+        indexes = [
+            models.Index(fields=['location', 'index']),
+        ]
+
+    def __str__(self):
+        return self.code
+
+
+# ===== Конец блока "Грузы" =====
