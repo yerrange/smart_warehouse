@@ -1,3 +1,4 @@
+# create_cargos.py
 import os
 import argparse
 import random
@@ -8,7 +9,7 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "smart_warehouse.settings")
 import django  # noqa: E402
 django.setup()
 
-from django.db import transaction, models  # noqa: E402
+from django.db import transaction  # noqa: E402
 from core.models import Cargo, CargoEvent, SKU  # noqa: E402
 
 # --------- Параметры по умолчанию ----------
@@ -18,8 +19,7 @@ DEFAULT_UNITS_MAX = 25
 
 # Если у тебя есть enum контейнеров в Cargo.Container — используем его;
 # иначе подставь строку по умолчанию, которая совпадает с size_class слотов.
-DEFAULT_CONTAINER_TYPE = getattr(Cargo, "Container", None)
-DEFAULT_CONTAINER_TYPE = getattr(DEFAULT_CONTAINER_TYPE, "PALLET", "pallet")
+DEFAULT_CONTAINER_TYPE = getattr(getattr(Cargo, "Container", None), "PALLET", "pallet")
 
 # 10 базовых SKU: code -> name (uom возьмётся как default="pcs")
 SKU_SEED = {
@@ -38,17 +38,19 @@ SKU_SEED = {
 
 # --------- SKU: ensure seed ----------
 def ensure_skus(seed: dict[str, str]) -> None:
+    """Гарантируем, что seed-SKU есть в базе (повторный запуск не дубликатит)."""
     for code, name in seed.items():
         SKU.objects.get_or_create(code=code, defaults={"name": name})
 
 
 def pick_random_sku() -> SKU:
+    """Возвращает случайный активный SKU; если нет ни одного — досоздаёт seed и выбирает."""
     sku = SKU.objects.filter(is_active=True).order_by("?").first()
     if not sku:
         ensure_skus(SKU_SEED)
         sku = SKU.objects.filter(is_active=True).order_by("?").first()
     if not sku:
-        # На всякий случай (если все is_active=False)
+        # На крайний случай (если все is_active=False)
         code, name = next(iter(SKU_SEED.items()))
         sku, _ = SKU.objects.get_or_create(code=code, defaults={"name": name, "is_active": True})
     return sku
@@ -81,48 +83,24 @@ def create_created_cargo(
     sku = pick_random_sku()
     cargo_code = generate_cargo_code(prefix=prefix, length=code_length)
 
-    # Готовим общие поля
-    base_kwargs = dict(
+    cargo = Cargo.objects.create(
         cargo_code=cargo_code,
+        sku=sku,                            # FK → SKU
+        sku_name_snapshot=sku.name,         # снимок названия на момент создания
         units=units,
         container_type=container_type,
         status=Cargo.Status.CREATED,
-        handling_state=getattr(Cargo.HandlingState, "IDLE", "idle"),
+        handling_state=Cargo.HandlingState.IDLE,
         current_slot=None,
     )
 
-    # Пытаемся сохранить SKU как FK (если в модели Cargo поле sku — ForeignKey на SKU)
-    try:
-        field = Cargo._meta.get_field("sku")
-        if isinstance(field, models.ForeignKey) and field.related_model is SKU:
-            cargo = Cargo.objects.create(sku=sku, **base_kwargs)
-        else:
-            # Если sku — не FK: пишем код (и, при наличии, name-снапшот)
-            base_kwargs["sku"] = sku.code
-            if "name" in [f.name for f in Cargo._meta.get_fields()]:
-                base_kwargs["name"] = sku.name
-            cargo = Cargo.objects.create(**base_kwargs)
-    except Exception:
-        # На всякий случай, если поля отличаются — пишем только обязательное
-        base_kwargs["sku"] = getattr(sku, "code", "SKU-UNKNOWN")
-        cargo = Cargo.objects.create(**base_kwargs)
-
     # Событие "created" — для таймлайна
-    try:
-        CargoEvent.objects.create(
-            cargo=cargo,
-            event_type=CargoEvent.EventType.CREATED,
-            quantity=cargo.units,
-            note="Создано скриптом create_cargo_created.py",
-        )
-    except Exception:
-        # если ENUM без created — fallback
-        CargoEvent.objects.create(
-            cargo=cargo,
-            event_type=getattr(CargoEvent.EventType, "NOTE", "note"),
-            quantity=cargo.units,
-            note="Cargo created (fallback event)",
-        )
+    CargoEvent.objects.create(
+        cargo=cargo,
+        event_type=CargoEvent.EventType.CREATED,
+        quantity=cargo.units,
+        note="Создано скриптом create_cargos.py",
+    )
 
     return cargo
 
@@ -153,21 +131,12 @@ def generate_batch(
 
     print(f"Создано грузов (status=created): {len(created)}")
     for c in created[:5]:
-        # Печать краткой строки (с учётом разных вариантов поля sku)
-        sku_code = None
-        try:
-            # если FK — покажем code
-            if isinstance(Cargo._meta.get_field("sku"), models.ForeignKey):
-                sku_code = getattr(getattr(c, "sku", None), "code", None)
-        except Exception:
-            pass
-        sku_code = sku_code or getattr(c, "sku", None)
-        print(f"  {c.cargo_code} | SKU={sku_code} | units={c.units} | {c.container_type}")
+        print(f"  {c.cargo_code} | SKU={c.sku.code} «{c.sku_name_snapshot}» | units={c.units} | {c.container_type}")
 
 
 def parse_args():
     p = argparse.ArgumentParser(description="Генерация грузов на стадии 'created' + SKU seed")
-    p.add_argument("--count", type=int, default=DEFAULT_COUNT, help="Сколько грузов создать")
+    p.add_argument("--count", type=int, default=DEFAULT_COUNT, help="Сколько грузов создать (0 = только посеять SKU)")
     p.add_argument("--container-type", default=DEFAULT_CONTAINER_TYPE, help="Тип контейнера (должен совпадать с size_class слотов)")
     p.add_argument("--units-min", type=int, default=DEFAULT_UNITS_MIN)
     p.add_argument("--units-max", type=int, default=DEFAULT_UNITS_MAX)
@@ -181,13 +150,18 @@ if __name__ == "__main__":
     if args.units_min <= 0 or args.units_max < args.units_min:
         raise SystemExit("Неверные параметры: units-min/units-max")
     try:
-        generate_batch(
-            count=args.count,
-            container_type=args.container_type,
-            units_min=args.units_min,
-            units_max=args.units_max,
-            prefix=args.prefix,
-            code_length=args.code_length,
-        )
+        # сидим SKU всегда; если --count=0, просто создадим/обновим каталог и выйдем
+        ensure_skus(SKU_SEED)
+        if args.count == 0:
+            print("SKU seed обновлён. Грузы не создавались (count=0).")
+        else:
+            generate_batch(
+                count=args.count,
+                container_type=args.container_type,
+                units_min=args.units_min,
+                units_max=args.units_max,
+                prefix=args.prefix,
+                code_length=args.code_length,
+            )
     except Exception as e:
         raise SystemExit(f"Ошибка генерации: {e}")
