@@ -484,12 +484,12 @@ class CargoEvent(models.Model):
 # === Ячейки хранения ===
 class StorageLocation(models.Model):
     class LocationType(models.TextChoices):
-        INBOUND = 'inbound', _('Inbound dock')        # зона приемки
-        STAGING = 'staging', _('Staging area')        # буфер
-        RACK = 'rack', _('Rack/bin')                  # стеллаж/ячейка
-        PICK_FACE = 'pick', _('Pick face')            # отборочная зона
-        OUTBOUND = 'outbound', _('Outbound dock')     # отгрузка
-        QC = 'qc', _('Quality control')               # контроль качества
+        INBOUND = 'inbound', 'Зона приёмки'
+        STAGING = 'staging', 'Зона временного хранения'
+        RACK = 'rack', 'Зона длительного хранения'
+        PICK_FACE = 'pick', 'Отборочная зона'
+        OUTBOUND = 'outbound', 'Зона отгрузки'
+        QC = 'qc', 'Зона контроля качества'
 
     code = models.CharField(max_length=64, unique=True)  # Человеческий/сканируемый код ячейки, например Z1-A02-R03-S1-B05
     location_type = models.CharField(
