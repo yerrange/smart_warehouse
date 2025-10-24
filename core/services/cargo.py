@@ -61,7 +61,7 @@ def _check_slot_free_and_compatible(slot: LocationSlot, cargo: Cargo) -> None:
     """Проверка, что слот свободен и подходит по классу размера/контейнеру."""
     if not _slot_is_free(slot):
         raise ValidationError("Слот занят другим грузом")
-    if slot.size_class != cargo.container_type:
+    if slot.location.slot_size_class != cargo.container_type:
         raise ValidationError("Неверный класс ячейки для типа контейнера груза")
 
 

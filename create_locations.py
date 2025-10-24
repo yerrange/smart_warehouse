@@ -64,6 +64,8 @@ def _make_slot_code(location_code: str, idx: int) -> str:
     return f"{location_code}-#{idx}"
 
 
+from django.db import transaction
+
 @transaction.atomic
 def ensure_location_with_slots(
     *,
@@ -77,7 +79,9 @@ def ensure_location_with_slots(
     shelf: str = "",
     bin_: str = "",
 ):
-    """Создаёт StorageLocation (если нет) и добивает нужное число слотов."""
+    """Создаёт/обновляет StorageLocation и добивает нужное число слотов.
+    Размер ячеек хранится ТОЛЬКО на уровне локации (slot_size_class).
+    """
     loc, created = StorageLocation.objects.get_or_create(
         code=code,
         defaults=dict(
@@ -92,15 +96,14 @@ def ensure_location_with_slots(
         ),
     )
 
-    # Если локация уже существовала, актуализируем параметры (безопасно)
+    # Актуализируем параметры существующей локации (безопасно)
     to_update = []
     if loc.slot_count != slot_count:
-        loc.slot_count = slot_count
-        to_update.append("slot_count")
+        loc.slot_count = slot_count; to_update.append("slot_count")
     if loc.slot_size_class != slot_size_class:
-        loc.slot_size_class = slot_size_class
-        to_update.append("slot_size_class")
-    # Адресные поля (на случай, если менялись шаблоны)
+        loc.slot_size_class = slot_size_class; to_update.append("slot_size_class")
+
+    # Адресные поля
     if loc.zone != zone:
         loc.zone = zone; to_update.append("zone")
     if loc.aisle != aisle:
@@ -111,6 +114,7 @@ def ensure_location_with_slots(
         loc.shelf = shelf; to_update.append("shelf")
     if loc.bin != bin_:
         loc.bin = bin_; to_update.append("bin")
+
     if to_update:
         loc.save(update_fields=to_update + ["updated_at"])
 
@@ -121,15 +125,13 @@ def ensure_location_with_slots(
         _, slot_created = LocationSlot.objects.get_or_create(
             location=loc,
             index=i,
-            defaults=dict(
-                code=slot_code,
-                size_class=slot_size_class,
-            ),
+            defaults={"code": slot_code},  # <-- больше НЕ записываем size_class в слот
         )
         if slot_created:
             created_slots += 1
 
     return created, created_slots
+
 
 
 def main():

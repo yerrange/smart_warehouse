@@ -135,12 +135,25 @@ class TaskCreateSerializer(serializers.ModelSerializer):
         task_type = data.get("task_type")
         payload = data.get("payload") or {}
 
-        SLOT_IS_REQUIRED = {
+        CARGO_REQUIRED = {
+            Task.TaskType.RECEIVE_TO_INBOUND,
+            Task.TaskType.PUTAWAY_TO_RACK,
+            Task.TaskType.MOVE_BETWEEN_SLOTS,
+            Task.TaskType.DISPATCH_CARGO,
+        }
+
+        SLOT_REQUIRED = {
             Task.TaskType.RECEIVE_TO_INBOUND,
             Task.TaskType.PUTAWAY_TO_RACK,
             Task.TaskType.MOVE_BETWEEN_SLOTS,
         }
-        if task_type in SLOT_IS_REQUIRED and not payload.get("to_slot_code"):
+
+        if task_type in CARGO_REQUIRED:
+            cargo_code = data.get("cargo_code")
+            if not cargo_code and not data.get("cargo"):
+                raise serializers.ValidationError({"cargo_code": "Для этого типа задачи требуется груз (cargo_code)."})
+
+        if task_type in SLOT_REQUIRED and not payload.get("to_slot_code"):
             raise serializers.ValidationError({"payload": "Поле 'to_slot_code' обязательно для этого типа задачи."})
 
         return data
@@ -221,7 +234,7 @@ class LocationSlotShortSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = LocationSlot
-        fields = ["code", "location_code", "index", "size_class"]
+        fields = ["code", "location_code", "index"]
 
 
 class CargoReadSerializer(serializers.ModelSerializer):

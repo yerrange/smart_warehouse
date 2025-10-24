@@ -171,6 +171,7 @@ class Task(models.Model):
         PUTAWAY_TO_RACK = "PUTAWAY_TO_RACK", _("Putaway to rack")            # → cargo.store
         MOVE_BETWEEN_SLOTS = "MOVE_BETWEEN_SLOTS", _("Move between slots")   # → cargo.move
         DISPATCH_CARGO = "DISPATCH_CARGO", _("Dispatch cargo")               # → cargo.dispatch
+        GENERAL = "GENERAL", _("GENERAL TASK")
 
     class Status(models.TextChoices):
         PENDING = "pending", _("Pending")
@@ -542,10 +543,6 @@ class LocationSlot(models.Model):
     )
     index = models.PositiveSmallIntegerField(help_text="Порядковый номер слота внутри локации (1..slot_count)")
     code = models.CharField(max_length=80, unique=True)  # например: "{location.code}-#1"
-    size_class = models.CharField(
-        max_length=16,
-        choices=StorageLocation.SlotSize.choices
-    )
 
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)

@@ -18,6 +18,19 @@ from core.serializers import TaskReadSerializer
 from core.services import cargo as cargo_service
 
 
+CARGO_TYPES = {
+    Task.TaskType.RECEIVE_TO_INBOUND,
+    Task.TaskType.PUTAWAY_TO_RACK,
+    Task.TaskType.MOVE_BETWEEN_SLOTS,
+    Task.TaskType.DISPATCH_CARGO,
+}
+
+MOVE_LIKE = {
+    Task.TaskType.RECEIVE_TO_INBOUND,
+    Task.TaskType.PUTAWAY_TO_RACK,
+    Task.TaskType.MOVE_BETWEEN_SLOTS,
+}
+
 FUNC_TO_CALL = {
     Task.TaskType.RECEIVE_TO_INBOUND: cargo_service.arrive,
     Task.TaskType.PUTAWAY_TO_RACK: cargo_service.store,
@@ -148,10 +161,11 @@ def start_task(task: Task) -> bool:
     task.started_at = now()
     task.save(update_fields=["status", "started_at", "updated_at"])
 
+    if task.task_type in CARGO_TYPES:
     # task.cargo_id, а не task.cargo.id - быстрее и не нагружает БД
-    if task.cargo_id and task.cargo.handling_state != Cargo.HandlingState.PROCESSING:
-        task.cargo.handling_state = Cargo.HandlingState.PROCESSING
-        task.cargo.save(update_fields=["handling_state", "updated_at"])
+        if task.cargo_id and task.cargo.handling_state != Cargo.HandlingState.PROCESSING:
+            task.cargo.handling_state = Cargo.HandlingState.PROCESSING
+            task.cargo.save(update_fields=["handling_state", "updated_at"])
 
     try:
         stats = task.shift.employee_stats.get(employee=task.assigned_to)
@@ -173,21 +187,25 @@ def complete_task(task: Task) -> bool:
     if task.status != "in_progress" or not task.assigned_to:
         return False
 
-    if task.cargo_id and task.task_type:
-        operation = FUNC_TO_CALL.get(task.task_type)
-        if operation:
-            payload = task.payload or {}
-            employee_code = getattr(task.assigned_to, "employee_code", None)
+    if task.task_type in CARGO_TYPES:
+        # Грузовая задача без cargo — завершать нельзя
+        if not task.cargo_id:
+            return False
 
-            if task.task_type in (
-                Task.TaskType.RECEIVE_TO_INBOUND,
-                Task.TaskType.PUTAWAY_TO_RACK,
-                Task.TaskType.MOVE_BETWEEN_SLOTS
-            ):
-                to_slot = payload.get("to_slot_code")
-                operation(task.cargo.cargo_code, to_slot, employee_code, payload.get("note"))
-            elif task.task_type == Task.TaskType.DISPATCH_CARGO:
-                operation(task.cargo.cargo_code, employee_code, payload.get("note"))
+        operation = FUNC_TO_CALL.get(task.task_type)
+        if not operation:
+            return False
+
+        payload = task.payload or {}
+        employee_code = getattr(task.assigned_to, "employee_code", None)
+
+        if task.task_type in MOVE_LIKE:
+            to_slot = payload.get("to_slot_code")
+            if not to_slot:
+                return False  # обязательный параметр отсутствует
+            operation(task.cargo.cargo_code, to_slot, employee_code, payload.get("note"))
+        else:  # DISPATCH_CARGO
+            operation(task.cargo.cargo_code, employee_code, payload.get("note"))
 
     task.status = "completed"
     task.completed_at = now()

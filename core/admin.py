@@ -128,8 +128,8 @@ class StorageLocationAdmin(admin.ModelAdmin):
 
 @admin.register(LocationSlot)
 class LocationSlotAdmin(admin.ModelAdmin):
-    list_display = ("code", "location", "index", "size_class", "occupied", "cargo_display")
-    list_filter = ("size_class", "location__location_type", "location__zone")
+    list_display = ("code", "location", "index", "location__slot_size_class", "occupied", "cargo_display")
+    list_filter = ("location__slot_size_class", "location__location_type", "location__zone")
     search_fields = ("code", "location__code")
     ordering = ("location__id", "index")
 
