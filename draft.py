@@ -81,3 +81,10 @@ TaskAssignmentLog — только системой (сигнал/сервис �
 LocationSlot — не руками: создаём/сверяем через функцию ensure_location_with_slots(...), чтобы не нарушить нумерацию и связи.
 
 EmployeeShiftStats — это through-модель статистики, её создаёт система (при добавлении сотрудника в смену/старте задач). Редактировать вручную не нужно.
+
+
+
+celery -A smart_warehouse worker -l info -P solo --concurrency 1
+celery -A smart_warehouse worker -l info -P threads --concurrency 4
+
+celery -A smart_warehouse beat -l info

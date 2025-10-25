@@ -43,11 +43,12 @@ INSTALLED_APPS = [
     'drf_spectacular',
     'channels',
     'django_extensions',
+    'django_celery_beat',
 ]
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
-    "whitenoise.middleware.WhiteNoiseMiddleware",
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -155,3 +156,51 @@ CHANNEL_LAYERS = {
 
 STATIC_URL = '/static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+
+
+# === Celery ===
+CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://127.0.0.1:6379/0")
+CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "redis://127.0.0.1:6379/1")
+CELERY_TIMEZONE = "UTC"
+CELERY_TASK_TIME_LIMIT = 60
+CELERY_TASK_SOFT_TIME_LIMIT = 45
+CELERY_TASK_ALWAYS_EAGER = False  # в тестах можно True
+CELERY_ACCEPT_CONTENT = ["json"]
+CELERY_TASK_SERIALIZER = "json"
+CELERY_RESULT_SERIALIZER = "json"
+
+
+CELERY_BEAT_SCHEDULE = {
+    "assign-pending-tasks-every-5s": {
+        "task": "core.celery_tasks.assign_pending_tasks_loop_once",
+        "schedule": 5.0,  # секунды
+    },
+    # пример по крону:
+    # "nightly-audit": {
+    #     "task": "audit.tasks.build_today_merkle_root",
+    #     "schedule": crontab(minute=0, hour=0),
+    # },
+}
+
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "simple": {"format": "%(asctime)s %(levelname)s %(name)s: %(message)s"},
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "simple",
+        },
+    },
+    "loggers": {
+        # наш модуль
+        "core": {"handlers": ["console"], "level": "INFO", "propagate": True},
+        # сам Celery тоже полезно видеть
+        "celery": {"handlers": ["console"], "level": "INFO", "propagate": True},
+    },
+    # чтобы всё остальное тоже показывалось хотя бы предупреждениями
+    "root": {"handlers": ["console"], "level": "WARNING"},
+}
