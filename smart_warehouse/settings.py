@@ -44,6 +44,7 @@ INSTALLED_APPS = [
     'channels',
     'django_extensions',
     'django_celery_beat',
+    'audit.apps.AuditConfig'
 ]
 
 MIDDLEWARE = [
@@ -186,21 +187,21 @@ CELERY_BEAT_SCHEDULE = {
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
-    "formatters": {
-        "simple": {"format": "%(asctime)s %(levelname)s %(name)s: %(message)s"},
-    },
     "handlers": {
-        "console": {
-            "class": "logging.StreamHandler",
-            "formatter": "simple",
-        },
+        "console": {"class": "logging.StreamHandler"},
     },
     "loggers": {
-        # наш модуль
-        "core": {"handlers": ["console"], "level": "INFO", "propagate": True},
-        # сам Celery тоже полезно видеть
-        "celery": {"handlers": ["console"], "level": "INFO", "propagate": True},
+        # наш сводный лог «тика» всегда виден на INFO, независимо от -l у воркера
+        "core.celery_tasks": {"handlers": ["console"], "level": "INFO", "propagate": False},
+
+        # Celery – тише, чтобы не было «стены текста»
+        "celery": {"handlers": ["console"], "level": "WARNING", "propagate": False},
+        "celery.app.trace": {"handlers": ["console"], "level": "WARNING", "propagate": False},
+        "celery.worker.strategy": {"handlers": ["console"], "level": "WARNING", "propagate": False},
     },
-    # чтобы всё остальное тоже показывалось хотя бы предупреждениями
-    "root": {"handlers": ["console"], "level": "WARNING"},
+    # всё прочее — от WARNING и выше
+    # "root": {"handlers": ["console"], "level": "WARNING"},
 }
+
+# важно, чтобы Celery не перенастраивал root-логгер под свой -l
+CELERY_WORKER_HIJACK_ROOT_LOGGER = False

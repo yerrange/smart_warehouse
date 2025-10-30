@@ -1,7 +1,13 @@
 import os
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "smart_warehouse.settings")
+
+
+import django
+django.setup()
+
+
 from celery import Celery
 
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "smart_warehouse.settings")
 
 app = Celery("smart_warehouse")
 app.config_from_object("django.conf:settings", namespace="CELERY")

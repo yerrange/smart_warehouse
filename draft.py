@@ -88,3 +88,7 @@ celery -A smart_warehouse worker -l info -P solo --concurrency 1
 celery -A smart_warehouse worker -l info -P threads --concurrency 4
 
 celery -A smart_warehouse beat -l info
+
+
+celery -A smart_warehouse worker -l WARNING -P solo --concurrency 1
+celery -A smart_warehouse beat   -l WARNING
