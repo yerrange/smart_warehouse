@@ -16,6 +16,8 @@ from core.models import (
 )
 from core.serializers import TaskReadSerializer
 from core.services import cargo as cargo_service
+from audit.services import record_event
+from celery import current_task
 
 
 CARGO_TYPES = {
@@ -54,7 +56,7 @@ def assign_task_to_best_employee(task: Task, shift: Shift | None):
     if task.assigned_to or task.status != "pending" or not shift:
         return None
 
-    # Подходим только не занятые сотрудники смены И без уже назначенных pending-задач в этой смене
+    # Подходят только не занятые сотрудники смены И без уже назначенных pending-задач в этой смене
     stats_qs = (
         EmployeeShiftStats.objects
         .select_related("employee")
@@ -72,18 +74,24 @@ def assign_task_to_best_employee(task: Task, shift: Shift | None):
         .filter(pending_assigned=0)
     )
 
-    # Отфильтруем по квалификациям 
+    # Отфильтруем по квалификациям
     eligible = [s for s in stats_qs if employee_has_all_qualifications(s.employee, task)]
     if not eligible:
         return None
 
-    # Сортировка: меньше выполнял/меньше набрал очков
+    # Сортировка: меньше выполнял / меньше набрал очков
     eligible.sort(key=lambda s: (s.task_count or 0, s.shift_score or 0))
     selected = eligible[0]
     employee = selected.employee
 
-    # Атомарно назначаем только если задача всё ещё pending и без смены/исполнителя
-    # (или если смена уже установлена заранее — разрешим, но не перезаписываем другие поля)
+    # Снимок "до" — фиксируем ДО апдейта
+    before_shift_id = task.shift_id
+    before = {
+        "shift_id": str(before_shift_id) if before_shift_id is not None else None,
+        "assignee_id": None,
+    }
+
+    # Атомарно назначаем только если задача всё ещё pending и без исполнителя
     updated = (
         Task.objects
         .filter(pk=task.pk, status="pending", assigned_to__isnull=True)
@@ -97,21 +105,46 @@ def assign_task_to_best_employee(task: Task, shift: Shift | None):
     if not updated:
         return None  # гонка: кто-то уже изменил задачу
 
-    # Обновим инстанс task для отправки по WS/логов без повторного запроса
+    # Обновим инстанс task для WS/логов без повторного запроса
     task.assigned_to = employee
     if task.shift_id is None:
         task.shift = shift
         task.shift_id = shift.id
     task.assigned_at = now()
 
-    # Лог (как было)
-    # TaskAssignmentLog.objects.create(task=task, employee=employee, note="Автоназначение (эвристика)")
-
-
+    # Обновим счётчики
     selected.task_count = (selected.task_count or 0) + 1
     selected.save(update_fields=["task_count"])
 
-    # WS: шлём ПОЛНУЮ задачу (статус остаётся "pending")
+    # Blockchain Audit — готовим неизменяемые снимки для on_commit
+    after = {
+        "shift_id": str(task.shift_id) if task.shift_id is not None else None,
+        "assignee_id": str(task.assigned_to_id) if task.assigned_to_id else None,
+        "assignee_code": getattr(task.assigned_to, "employee_code", None),
+    }
+
+    req = getattr(current_task, "request", None)
+    meta = {
+        "source": "celery",
+        "celery_task_id": getattr(req, "id", None),
+    }
+
+    entity_id = str(task.id)
+
+    transaction.on_commit(
+        lambda eid=entity_id, b=before, a=after, m=meta: record_event(
+            actor_type="system",
+            actor_id="celery",
+            entity_type="Task",
+            entity_id=eid,
+            action="ASSIGN",
+            before=b,
+            after=a,
+            meta=m,
+        )
+    )
+
+    # WS: шлём полную задачу (статус остаётся "pending")
     channel_layer = get_channel_layer()
     async_to_sync(channel_layer.group_send)(
         "task_updates",
@@ -119,6 +152,7 @@ def assign_task_to_best_employee(task: Task, shift: Shift | None):
     )
 
     return employee
+
 
 
 @transaction.atomic

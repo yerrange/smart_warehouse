@@ -176,6 +176,11 @@ CELERY_BEAT_SCHEDULE = {
         "task": "core.celery_tasks.assign_pending_tasks_loop_once",
         "schedule": 5.0,  # секунды
     },
+    "audit-seal-every-60s": {
+        "task": "audit.celery_tasks.seal_block_tick",
+        "schedule": 30.0,
+        "args": [512],
+    },
     # пример по крону:
     # "nightly-audit": {
     #     "task": "audit.tasks.build_today_merkle_root",
@@ -193,6 +198,7 @@ LOGGING = {
     "loggers": {
         # наш сводный лог «тика» всегда виден на INFO, независимо от -l у воркера
         "core.celery_tasks": {"handlers": ["console"], "level": "INFO", "propagate": False},
+        "audit.celery_tasks": {"handlers": ["console"], "level": "INFO", "propagate": False},
 
         # Celery – тише, чтобы не было «стены текста»
         "celery": {"handlers": ["console"], "level": "WARNING", "propagate": False},

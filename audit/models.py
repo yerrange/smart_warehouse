@@ -1,4 +1,3 @@
-from django.db import models
 from __future__ import annotations
 from django.db import models
 from django.utils import timezone
@@ -39,7 +38,7 @@ class Block(models.Model):
     Merkle-корень и собственный хэш.
     """
     index = models.BigIntegerField(unique=True, db_index=True)
-    created_at = models.DateTimeField(default=timezone.now, db_index=True)
+    created_at = models.DateTimeField(db_index=True)
 
     prev_block_hash = models.CharField(max_length=64, null=True, blank=True)
     merkle_root = models.CharField(max_length=64)
