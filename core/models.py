@@ -136,7 +136,8 @@ class EmployeeShiftStats(models.Model):
     )
 
     is_busy = models.BooleanField(default=False)
-    task_count = models.IntegerField(default=0)
+    task_assigned_count = models.IntegerField(default=0)
+    task_completed_count = models.IntegerField(default=0)
     shift_score = models.IntegerField(default=0)
     last_task_at = models.DateTimeField(null=True, blank=True)
 
@@ -290,7 +291,7 @@ class TaskAssignmentLog(models.Model):
         related_name='assignment_history'
     )
     employee = models.ForeignKey('Employee', on_delete=models.CASCADE)
-    timestamp = models.DateTimeField(auto_now_add=True, db_index=True)
+    timestamp = models.DateTimeField(db_index=True)
     note = models.TextField(blank=True)
 
     class Meta:
