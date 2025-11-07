@@ -13,6 +13,8 @@ from core.models import (
     LocationSlot,
     StorageLocation,
 )
+from audit.services import record_event
+from django.utils.timezone import now
 
 
 __all__ = ["arrive", "store", "move", "dispatch"]
@@ -104,9 +106,17 @@ def arrive(
 
     if slot.location.location_type != StorageLocation.LocationType.INBOUND:
         raise ValidationError("Прибытие возможно только в зону INBOUND")
+    
+    before = {
+        "status": cargo.status,
+        "slot_code": None,
+        "units": cargo.units,
+    }
 
+    timestamp = now()
     cargo.current_slot = slot
     cargo.status = Cargo.Status.ARRIVED
+    cargo.updated_at = timestamp
     cargo.save(update_fields=["current_slot", "status", "updated_at"])
 
     event = CargoEvent.objects.create(
@@ -116,8 +126,35 @@ def arrive(
         to_slot=slot,
         quantity=cargo.units,
         employee=_get_employee(employee_code),
+        timestamp=timestamp,
         note=note or "Arrived at inbound dock",
     )
+
+    after = {
+        "status": cargo.status,
+        "slot_code": slot.code,
+        "units": cargo.units,
+        "cargo_code": cargo.cargo_code,
+    }
+    meta = {
+        "source": "core.services.cargos",
+        "func": "arrive",
+        "to_slot_code": to_slot_code,
+        "employee_code": employee_code,
+        "cargo_event_id": str(event.id),
+        "timestamp": timestamp.isoformat(),
+    }
+    entity_id = str(cargo.id)
+    transaction.on_commit(lambda eid=entity_id, b=before, a=after, m=meta: record_event(
+        actor_type="system",
+        actor_id="api",
+        entity_type="Cargo",
+        entity_id=eid,
+        action="ARRIVE",
+        before=b,
+        after=a,
+        meta=m,
+    ))
     return event
 
 
@@ -160,8 +197,16 @@ def store(
     if to_slot.location.location_type != StorageLocation.LocationType.RACK:
         raise ValidationError("Размещать можно только в зону хранения RACK")
 
+    before = {
+        "status": cargo.status,
+        "slot_code": from_slot.code if from_slot else None,
+        "units": cargo.units,
+    }
+
+    timestamp = now()
     cargo.current_slot = to_slot
     cargo.status = Cargo.Status.STORED
+    cargo.updated_at = timestamp
     cargo.save(update_fields=["current_slot", "status", "updated_at"])
 
     event = CargoEvent.objects.create(
@@ -171,8 +216,35 @@ def store(
         to_slot=to_slot,
         quantity=cargo.units,
         employee=_get_employee(employee_code),
+        timestamp=timestamp,
         note=note or "Putaway to storage",
     )
+    after = {
+        "status": cargo.status,
+        "slot_code": to_slot.code,
+        "units": cargo.units,
+        "cargo_code": cargo.cargo_code,
+    }
+    meta = {
+        "source": "core.services.cargos",
+        "func": "store",
+        "from_slot_code": from_slot.code if from_slot else None,
+        "to_slot_code": to_slot_code,
+        "employee_code": employee_code,
+        "cargo_event_id": str(event.id),
+        "timestamp": timestamp.isoformat(),
+    }
+    entity_id = str(cargo.id)
+    transaction.on_commit(lambda eid=entity_id, b=before, a=after, m=meta: record_event(
+        actor_type="system",
+        actor_id="api",
+        entity_type="Cargo",
+        entity_id=eid,
+        action="STORE",
+        before=b,
+        after=a,
+        meta=m,
+    ))
     return event
 
 
@@ -210,7 +282,14 @@ def move(
     _check_slot_free_and_compatible(to_slot, cargo)
 
     from_slot = cargo.current_slot
+    before = {
+        "status": cargo.status,
+        "slot_code": from_slot.code if from_slot else None,
+        "units": cargo.units,
+    }
+    timestamp = now()
     cargo.current_slot = to_slot
+    cargo.updated_at = timestamp
     cargo.save(update_fields=["current_slot", "updated_at"])
 
     event = CargoEvent.objects.create(
@@ -220,8 +299,35 @@ def move(
         to_slot=to_slot,
         quantity=cargo.units,
         employee=_get_employee(employee_code),
+        timestamp=timestamp,
         note=note or f"Move to {to_slot.location.location_type}",
     )
+    after = {
+        "status": cargo.status,
+        "slot_code": to_slot.code,
+        "units": cargo.units,
+        "cargo_code": cargo.cargo_code,
+    }
+    meta = {
+        "source": "core.services.cargos",
+        "func": "move",
+        "from_slot_code": from_slot.code if from_slot else None,
+        "to_slot_code": to_slot_code,
+        "employee_code": employee_code,
+        "cargo_event_id": str(event.id),
+        "timestamp": timestamp.isoformat(),
+    }
+    entity_id = str(cargo.id)
+    transaction.on_commit(lambda eid=entity_id, b=before, a=after, m=meta: record_event(
+        actor_type="system",
+        actor_id="api",
+        entity_type="Cargo",
+        entity_id=eid,
+        action="MOVE",
+        before=b,
+        after=a,
+        meta=m,
+    ))
     return event
 
 
@@ -238,7 +344,6 @@ def dispatch(
       - груз находится в ячейке OUTBOUND;
       - отгружается целиком (частичные списания запрещены).
     Результат:
-      - cargo.units = 0
       - cargo.status = DISPATCHED
       - cargo.current_slot = NULL
       - событие CargoEvent.DISPATCHED
@@ -255,17 +360,24 @@ def dispatch(
     if cargo.current_slot.location.location_type != StorageLocation.LocationType.OUTBOUND:
         raise ValidationError("Отгрузка разрешена только из зоны OUTBOUND. Переместите груз через /move")
 
+    from_slot = cargo.current_slot
     full_qty = cargo.units
     if full_qty <= 0:
         # На случай неконсистентных данных
         raise ValidationError("У груза отсутствуют единицы для отгрузки")
-
-    from_slot = cargo.current_slot
+    
+    before = {
+        "status": cargo.status,
+        "slot_code": from_slot.code if from_slot else None,
+        "units": full_qty,
+    }
 
     # cargo.units = 0
+    timestamp = now()
     cargo.status = Cargo.Status.DISPATCHED
     cargo.current_slot = None
     cargo.handling_state = Cargo.HandlingState.IDLE
+    cargo.updated_at = timestamp
     cargo.save(update_fields=["status", "current_slot", "handling_state", "updated_at"])
 
     event = CargoEvent.objects.create(
@@ -275,6 +387,33 @@ def dispatch(
         to_slot=None,
         quantity=full_qty,
         employee=_get_employee(employee_code),
+        timestamp=timestamp,
         note=note or "",
     )
+    
+    after = {
+        "status": cargo.status,
+        "slot_code": None,
+        "units": full_qty,            # доменная логика units не меняет — отражаем фактическое
+        "cargo_code": cargo.cargo_code,
+    }
+    meta = {
+        "source": "core.services.cargos",
+        "func": "dispatch",
+        "from_slot_code": from_slot.code if from_slot else None,
+        "employee_code": employee_code,
+        "cargo_event_id": str(event.id),
+        "timestamp": timestamp.isoformat(),
+    }
+    entity_id = str(cargo.id)
+    transaction.on_commit(lambda eid=entity_id, b=before, a=after, m=meta: record_event(
+        actor_type="system",
+        actor_id="api",
+        entity_type="Cargo",
+        entity_id=eid,
+        action="DISPATCH",
+        before=b,
+        after=a,
+        meta=m,
+    ))
     return event

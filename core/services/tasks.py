@@ -15,7 +15,7 @@ from core.models import (
     Cargo
 )
 from core.serializers import TaskReadSerializer
-from core.services import cargo as cargo_service
+from core.services import cargos as cargo_service
 from audit.services import record_event
 from celery import current_task
 
@@ -218,7 +218,10 @@ def assign_task_manually(task: Task, employee_code: str) -> None:
         "assigned_at": timestamp.isoformat(),
         "mode": "manual",
     }
-    meta = {"source": "api", "func": "assign_task_manually"}
+    meta = {
+        "source": "api",
+        "func": "assign_task_manually"
+    }
 
     entity_id = str(task.id)
     transaction.on_commit(lambda eid=entity_id, b=before, a=after, m=meta: record_event(
@@ -274,7 +277,10 @@ def start_task(task: Task) -> bool:
         "status": "in_progress",
         "started_at": timestamp.isoformat(),
     }
-    meta = {"source": "api", "func": "start_task"}
+    meta = {
+        "source": "api",
+        "func": "start_task"
+    }
 
     entity_id = str(task.id)
     transaction.on_commit(lambda eid=entity_id, b=before, a=after, m=meta: record_event(
@@ -362,7 +368,10 @@ def complete_task(task: Task) -> bool:
         "status": "completed",
         "completed_at": timestamp.isoformat(),
     }
-    meta = {"source": "api", "func": "complete_task"}
+    meta = {
+        "source": "api",
+        "func": "complete_task"
+    }
 
     entity_id = str(task.id)
     transaction.on_commit(lambda eid=entity_id, b=before, a=after, m=meta: record_event(

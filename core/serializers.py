@@ -13,7 +13,8 @@ from core.models import (
 )
 from django.db import transaction
 from datetime import datetime
-from core.services import cargo as cargo_service
+from core.services import cargos as cargo_service
+from django.utils import timezone
 
 # === Работники и смены ===
 

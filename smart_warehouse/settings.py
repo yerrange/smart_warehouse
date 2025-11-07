@@ -176,7 +176,7 @@ CELERY_BEAT_SCHEDULE = {
         "task": "core.celery_tasks.assign_pending_tasks_loop_once",
         "schedule": 5.0,  # секунды
     },
-    "audit-seal-every-60s": {
+    "audit-seal": {
         "task": "audit.celery_tasks.seal_block_tick",
         "schedule": 30.0,
         "args": [512],

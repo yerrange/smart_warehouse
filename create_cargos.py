@@ -11,6 +11,7 @@ django.setup()
 
 from django.db import transaction  # noqa: E402
 from core.models import Cargo, CargoEvent, SKU  # noqa: E402
+from django.utils import timezone
 
 # --------- Параметры по умолчанию ----------
 DEFAULT_COUNT = 20
@@ -94,11 +95,13 @@ def create_created_cargo(
         current_slot=None,
     )
 
+    timestamp = timezone.now()
     # Событие "created" — для таймлайна
     CargoEvent.objects.create(
         cargo=cargo,
         event_type=CargoEvent.EventType.CREATED,
         quantity=cargo.units,
+        timestamp=timestamp,
         note="Создано скриптом create_cargos.py",
     )
 

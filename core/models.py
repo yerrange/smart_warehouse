@@ -146,13 +146,13 @@ class EmployeeShiftStats(models.Model):
         indexes = [
             models.Index(fields=['shift', 'is_busy']),
             models.Index(fields=['employee', 'shift']),
-            models.Index(fields=['-shift_score', 'task_count']),
+            models.Index(fields=['-shift_score', 'task_completed_count']),
         ]
-        ordering = ['-shift_score', 'task_count', 'employee_id']
+        ordering = ['-shift_score', 'task_completed_count', 'employee_id']
 
     def __str__(self):
         return f"{self.employee} @ {self.shift}: {'занят' if self.is_busy else 'свободен'}, " \
-               f"задач={self.task_count}, очки={self.shift_score}"
+               f"задач={self.task_completed_count}, очки={self.shift_score}"
 
 
 # ===== Конец блока "Смены" =====
@@ -446,7 +446,7 @@ class CargoEvent(models.Model):
         db_index=True
     )
     event_type = models.CharField(max_length=16, choices=EventType.choices)
-    timestamp = models.DateTimeField(auto_now_add=True, db_index=True)
+    timestamp = models.DateTimeField(db_index=True)
 
     from_slot = models.ForeignKey(
         'LocationSlot',

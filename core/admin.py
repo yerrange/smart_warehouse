@@ -47,8 +47,8 @@ class EmployeeShiftStatsInline(admin.TabularInline):
     model = EmployeeShiftStats
     extra = 0
     autocomplete_fields = ("employee",)
-    fields = ("employee", "is_busy", "task_count", "shift_score", "last_task_at")
-    readonly_fields = ("is_busy", "task_count", "shift_score", "last_task_at")
+    fields = ("employee", "is_busy", "task_assigned_count", "task_completed_count", "shift_score", "last_task_at")
+    readonly_fields = ("is_busy", "task_assigned_count", "task_completed_count", "shift_score", "last_task_at")
 
 
 # === Employee ===
@@ -106,7 +106,7 @@ class ShiftAdmin(admin.ModelAdmin):
 
 @admin.register(EmployeeShiftStats)
 class EmployeeShiftStatsAdmin(admin.ModelAdmin):
-    list_display = ("employee", "shift", "shift_date", "task_count", "shift_score", "is_busy")
+    list_display = ("employee", "shift", "shift_date", "task_assigned_count", "task_completed_count", "shift_score", "is_busy")
     list_filter = ("shift", "is_busy")
     search_fields = ("shift__date", "employee__first_name", "employee__last_name", "employee__employee_code")
 
