@@ -149,7 +149,6 @@ def assign_task_to_best_employee(task: Task, shift: Shift | None):
         )
     )
 
-    # TaskAssignmentLog — оставим для UI/быстрых отчётов
     TaskAssignmentLog.objects.create(
         task=task,
         employee=employee,

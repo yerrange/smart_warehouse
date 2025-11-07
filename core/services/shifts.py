@@ -6,6 +6,7 @@ from channels.layers import get_channel_layer
 from core.models import Shift, Employee, EmployeeShiftStats, TaskPool, TaskAssignmentLog
 from core.services.tasks import assign_task_to_best_employee
 from rest_framework.exceptions import ValidationError
+from django.utils import timezone
 
 from audit.services import record_event
 
@@ -91,37 +92,38 @@ def assign_tasks_from_pool_to_shift(shift: Shift) -> int:
     for task in tasks:
         employee = assign_task_to_best_employee(task, shift)
         if employee:
-            TaskAssignmentLog.objects.create(
-                task=task,
-                employee=employee,
-                note="Назначено из пула при старте смены",
-            )
+            # TaskAssignmentLog.objects.create(
+            #     task=task,
+            #     employee=employee,
+            #     note="Назначено из пула при старте смены",
+            # )
             assigned_count += 1
             assigned_ids.append(str(task.id))
 
-    if assigned_count:
-        preview_limit = 20
-        preview_ids = assigned_ids[:preview_limit]
-        more = assigned_count - len(preview_ids)
-        transaction.on_commit(lambda: record_event(
-            actor_type="system",
-            actor_id="service:shifts",
-            entity_type="Shift",
-            entity_id=str(shift.id),
-            action="ASSIGN_FROM_POOL",
-            before=None,
-            after={"assigned_count": assigned_count},
-            meta={
-                "source": "service",
-                "func": "assign_tasks_from_pool_to_shift",
-                "preview_task_ids": preview_ids,
-                "more": max(0, more),
-            },
-        ))
+    # if assigned_count:
+    #     preview_limit = 20
+    #     preview_ids = assigned_ids[:preview_limit]
+    #     more = assigned_count - len(preview_ids)
+    #     transaction.on_commit(lambda: record_event(
+    #         actor_type="system",
+    #         actor_id="service:shifts",
+    #         entity_type="Shift",
+    #         entity_id=str(shift.id),
+    #         action="ASSIGN_FROM_POOL",
+    #         before=None,
+    #         after={"assigned_count": assigned_count},
+    #         meta={
+    #             "source": "service",
+    #             "func": "assign_tasks_from_pool_to_shift",
+    #             "preview_task_ids": preview_ids,
+    #             "more": max(0, more),
+    #         },
+    #     ))
 
     return assigned_count
 
 
+@transaction.atomic
 def start_shift(shift: Shift) -> int:
     """Запускает смену и назначает задачи из пула. Возвращает число назначенных задач."""
     if not shift.employees.exists():
@@ -159,6 +161,7 @@ def start_shift(shift: Shift) -> int:
     return assigned
 
 
+@transaction.atomic
 def close_shift(shift: Shift) -> int:
     """
     Закрывает смену: возвращает незавершённые задачи в пул, освобождает сотрудников, шлёт событие.
@@ -209,10 +212,13 @@ def close_shift(shift: Shift) -> int:
 
         task_events.append((str(task.id), before, after))
 
+        timestamp = timezone.now()
+
         if prev_employee:
             TaskAssignmentLog.objects.create(
                 task=task,
                 employee=prev_employee,
+                timestamp=timestamp,
                 note="Снята и возвращена в пул при завершении смены",
             )
 
@@ -241,7 +247,7 @@ def close_shift(shift: Shift) -> int:
                 action="RETURN_TO_POOL",
                 before=b,
                 after=a,
-                meta={"source": "service", "func": "close_shift", "shift_id": str(shift.id)},
+                meta={"source": "service", "func": "close_shift", "shift_id": str(shift.id), "timestamp": timestamp.isoformat()},
             )
         # Итоговое событие закрытия смены
         record_event(
