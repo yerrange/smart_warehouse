@@ -5,6 +5,7 @@ from django.utils.timezone import now
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 from rest_framework.exceptions import NotFound
+from core.ai_task_assignment.runtime import pick_assignee
 
 from core.models import (
     Task,
@@ -18,6 +19,9 @@ from core.serializers import TaskReadSerializer
 from core.services import cargos as cargo_service
 from audit.services import record_event
 from celery import current_task
+
+import logging
+logger = logging.getLogger("core.task_assigner")
 
 
 CARGO_TYPES = {
@@ -74,15 +78,39 @@ def assign_task_to_best_employee(task: Task, shift: Shift | None):
         .filter(pending_assigned=0)
     )
 
-    # Отфильтруем по квалификациям
+    # # Отфильтруем по квалификациям
     eligible = [s for s in stats_qs if employee_has_all_qualifications(s.employee, task)]
     if not eligible:
         return None
 
-    # Сортировка: меньше выполнял / меньше набрал очков
-    eligible.sort(key=lambda s: (s.shift_score or 0, s.task_completed_count or 0))
-    selected = eligible[0]
+    # # Сортировка: меньше выполнял / меньше набрал очков
+    # eligible.sort(key=lambda s: (s.shift_score or 0, s.task_completed_count or 0))
+    # selected = eligible[0]
+    # employee = selected.employee
+
+
+    timestamp = now()  # единый таймштамп – и для ML-фич, и для БД/аудита
+
+    pick = pick_assignee(task=task, shift=shift, eligible_stats=eligible, ts=timestamp)
+    if not pick.selected_stats:
+        return None
+
+    selected = pick.selected_stats
     employee = selected.employee
+
+    if pick.mode == "ml":
+        top = pick.topk or []
+        top_str = "; ".join(
+            f"{c.get('employee_code') or c['employee_id']}={c.get('predicted_minutes'):.2f}m"
+            for c in top
+            if c.get("predicted_minutes") is not None
+        )
+        note = f"Автоназначение (ML) – best={pick.predicted_minutes:.2f}m – top{len(top)}: {top_str}"
+    elif pick.mode == "heuristic_fallback":
+        note = f"Автоназначение (fallback→эвристика) – причина: {pick.error}"
+    else:
+        note = "Автоназначение (эвристика)"
+
 
     # Снимок "до" — фиксируем ДО апдейта
     before_shift_id = task.shift_id
@@ -91,8 +119,6 @@ def assign_task_to_best_employee(task: Task, shift: Shift | None):
         "assignee_id": None,
         "assigned_at": None,
     }
-
-    timestamp = now()  # единый таймштамп для БД и аудита
 
     # Атомарно назначаем только если задача всё ещё pending и без исполнителя
     updated = (
@@ -125,8 +151,13 @@ def assign_task_to_best_employee(task: Task, shift: Shift | None):
         "assignee_id": str(task.assigned_to_id) if task.assigned_to_id else None,
         "assignee_code": getattr(task.assigned_to, "employee_code", None),
         "assigned_at": timestamp.isoformat(),
-        "mode": "auto",
+        "mode": pick.mode,
     }
+
+    if pick.predicted_minutes is not None:
+        after["ml_predicted_minutes"] = round(float(pick.predicted_minutes), 3)
+    if pick.error:
+        after["ml_error"] = pick.error
 
     req = getattr(current_task, "request", None)
     meta = {
@@ -153,9 +184,19 @@ def assign_task_to_best_employee(task: Task, shift: Shift | None):
         task=task,
         employee=employee,
         timestamp=timestamp,
-        note="Автоназначение (эвристика)"
+        note=note
     )
 
+    logger.info(
+        "ASSIGN – task_id=%s type=%s mode=%s employee=%s pred=%s topk=%s err=%s",
+        task.id,
+        task.task_type,
+        pick.mode,
+        getattr(employee, "employee_code", employee.id),
+        f"{pick.predicted_minutes:.3f}" if pick.predicted_minutes is not None else None,
+        pick.topk,
+        pick.error,
+    )
     # WS: шлём полную задачу (статус остаётся "pending")
     channel_layer = get_channel_layer()
     async_to_sync(channel_layer.group_send)(

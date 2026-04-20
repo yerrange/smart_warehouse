@@ -50,6 +50,16 @@ dot -Tpng schema.dot -o schema.png
   "task_type": "DISPATCH_CARGO"
 }
 
+Общее задание
+{
+  "name": "test_task_1",
+  "description": "test_task_1",
+  "difficulty": 1,
+  "priority": 1,
+  "task_type": "GENERAL"
+}
+
+
 
 Коротко: в админке лучше создавать справочники и расписание, а всё, что меняет поток операций (перемещения/события/назначения задач), — через API/сервисы.
 
@@ -92,3 +102,7 @@ celery -A smart_warehouse beat -l info
 
 celery -A smart_warehouse worker -l WARNING -P solo --concurrency 1
 celery -A smart_warehouse beat   -l WARNING
+
+
+python manage.py simulate_history --purge --reset-stats --employees 12 --tasks 300 --dataset-out ml_data/sim_dataset.csv
+python manage.py train_task_assigner --dataset ml_data/sim_dataset.csv

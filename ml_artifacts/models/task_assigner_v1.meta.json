@@ -1,0 +1,27 @@
+{
+  "model_type": "CatBoostRegressor",
+  "loss_function": "MAE",
+  "feature_cols": [
+    "task_type",
+    "priority",
+    "difficulty",
+    "estimated_minutes",
+    "task_age_minutes",
+    "emp_task_assigned_count",
+    "emp_task_completed_count",
+    "emp_shift_score",
+    "minutes_into_shift"
+  ],
+  "cat_cols": [
+    "task_type"
+  ],
+  "dataset": "ml_data\\sim_dataset.csv",
+  "seed": 42,
+  "iterations": 460,
+  "metrics": {
+    "mae": 4.551065028598302,
+    "rmse": 6.28318191459858,
+    "baseline_mae": 12.500239006745442,
+    "baseline_rmse": 15.724552426623246
+  }
+}

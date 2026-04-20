@@ -199,6 +199,7 @@ LOGGING = {
         # наш сводный лог «тика» всегда виден на INFO, независимо от -l у воркера
         "core.celery_tasks": {"handlers": ["console"], "level": "INFO", "propagate": False},
         "audit.celery_tasks": {"handlers": ["console"], "level": "INFO", "propagate": False},
+        "core.task_assigner": {"handlers": ["console"], "level": "INFO", "propagate": False},
 
         # Celery – тише, чтобы не было «стены текста»
         "celery": {"handlers": ["console"], "level": "WARNING", "propagate": False},
@@ -211,3 +212,15 @@ LOGGING = {
 
 # важно, чтобы Celery не перенастраивал root-логгер под свой -l
 CELERY_WORKER_HIJACK_ROOT_LOGGER = False
+
+
+# === ML task assignment (CatBoost) ===
+TASK_ASSIGNER_MODE = os.getenv("TASK_ASSIGNER_MODE", "ml").lower()  # ml | heuristic
+TASK_ASSIGNER_MODEL_PATH = os.getenv(
+    "TASK_ASSIGNER_MODEL_PATH",
+    str(BASE_DIR / "ml_artifacts" / "models" / "task_assigner_v1.cbm"),
+)
+TASK_ASSIGNER_META_PATH = os.getenv(
+    "TASK_ASSIGNER_META_PATH",
+    str(BASE_DIR / "ml_artifacts" / "models" / "task_assigner_v1.meta.json"),
+)

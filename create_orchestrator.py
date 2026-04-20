@@ -1,4 +1,3 @@
-# bootstrap_project.py
 import os
 import sys
 import subprocess
@@ -66,7 +65,6 @@ def main():
     ensure_superuser(username="admin", email="admin@admin.com", password="admin")
 
     print("=== Шаг 4–6. Скрипты инициализации данных ===")
-    # порядок как вы просили
     run_seed_script("create_employees.py")
     run_seed_script("create_locations.py")
     run_seed_script("create_cargos.py")
@@ -78,7 +76,6 @@ if __name__ == "__main__":
     try:
         main()
     except subprocess.CalledProcessError as e:
-        # красиво падаем, если один из подпроцессов завершился с ошибкой
         raise SystemExit(f"Ошибка при выполнении команды: {e}") from e
     except Exception as e:
         raise SystemExit(f"Сбой инициализации: {e}") from e
