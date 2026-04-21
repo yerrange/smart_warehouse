@@ -10,6 +10,7 @@ from core.models import (
     LocationSlot,
     Cargo,
     CargoEvent,
+    EmployeeShiftStats
 )
 from django.db import transaction
 from datetime import datetime
@@ -44,7 +45,36 @@ class ShiftSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Shift
-        fields = ["id", "name", "date", "start_time", "end_time", "is_active", "employees"]
+        fields = [
+            "id",
+            "name",
+            "date",
+            "start_time",
+            "end_time",
+            "is_active",
+            "employees"
+        ]
+
+
+class EmployeeShiftStatsEmployeeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Employee
+        fields = ["id", "employee_code", "first_name", "last_name"]
+
+
+class EmployeeShiftStatsSerializer(serializers.ModelSerializer):
+    employee = EmployeeShiftStatsEmployeeSerializer(read_only=True)
+
+    class Meta:
+        model = EmployeeShiftStats
+        fields = [
+            "employee",
+            "is_busy",
+            "task_assigned_count",
+            "task_completed_count",
+            "shift_score",
+            "last_task_at",
+        ]
 
 
 class ShiftCreateSerializer(serializers.Serializer):
