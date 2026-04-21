@@ -7,10 +7,8 @@ from rest_framework.exceptions import ValidationError, NotFound
 from core.models import (
     Shift,
     TaskPool,
-    TaskAssignmentLog,
     Employee,
     Task,
-    EmployeeShiftStats,
     Cargo,
 )
 from core.serializers import (

@@ -2,6 +2,7 @@ from rest_framework import serializers
 from core.models import (
     Shift,
     Employee,
+    EmployeeShiftStats,
     Task,
     TaskAssignmentLog,
     Qualification,
@@ -10,14 +11,12 @@ from core.models import (
     LocationSlot,
     Cargo,
     CargoEvent,
-    EmployeeShiftStats
 )
 from django.db import transaction
-from datetime import datetime
 from core.services import cargos as cargo_service
-from django.utils import timezone
 
 # === Работники и смены ===
+
 
 class QualificationShortSerializer(serializers.ModelSerializer):
     class Meta:
@@ -36,7 +35,14 @@ class EmployeeSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Employee
-        fields = ["id", "employee_code", "first_name", "last_name", "qualifications", "is_active"]
+        fields = [
+            "id",
+            "employee_code",
+            "first_name",
+            "last_name",
+            "qualifications",
+            "is_active"
+        ]
 
 
 class ShiftSerializer(serializers.ModelSerializer):
@@ -191,7 +197,6 @@ class TaskCreateSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         qualification_codes = validated_data.pop("required_qualification_codes", [])
-        employee_code = validated_data.pop("assigned_employee_code", None)
         cargo_code = validated_data.pop("cargo_code", None)
 
         if not validated_data.get("task_pool"):
@@ -213,14 +218,6 @@ class TaskCreateSerializer(serializers.ModelSerializer):
         if qualification_codes:
             qualifications = Qualification.objects.filter(code__in=qualification_codes)
             task.required_qualifications.set(qualifications)
-
-        if employee_code:
-            try:
-                employee = Employee.objects.get(employee_code=employee_code)
-            except Employee.DoesNotExist:
-                raise serializers.ValidationError({"assigned_employee_code": "Сотрудник не найден"})
-            task.assigned_to = employee
-            task.save(update_fields=["assigned_to"])
 
         return task
 
