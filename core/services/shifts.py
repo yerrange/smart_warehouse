@@ -3,7 +3,14 @@ from django.db import transaction
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 
-from core.models import Shift, Employee, EmployeeShiftStats, TaskPool, TaskAssignmentLog
+from core.models import (
+    Shift,
+    Employee,
+    EmployeeShiftStats,
+    Task,
+    TaskPool, 
+    TaskAssignmentLog
+)
 from core.services.tasks import assign_task_to_best_employee
 from rest_framework.exceptions import ValidationError
 from django.utils import timezone
@@ -145,7 +152,7 @@ def start_shift(shift: Shift) -> int:
     after_state = {
         "is_active": shift.is_active,
         "start_time": shift.start_time.isoformat() if shift.start_time else None,
-        "actual_start_time": shift.actual_start_time.isoformat() if shift.start_time else None,
+        "actual_start_time": shift.actual_start_time.isoformat() if shift.actual_start_time else None,
     }
 
     transaction.on_commit(lambda: record_event(
@@ -170,7 +177,6 @@ def close_shift(shift: Shift) -> int:
     if not shift.is_active:
         raise ValueError("Смена уже закрыта.")
 
-    # Снимок "до" для смены
     before_shift = {
         "is_active": shift.is_active,
         "end_time": shift.end_time.isoformat() if shift.end_time else None,
@@ -178,41 +184,48 @@ def close_shift(shift: Shift) -> int:
     }
 
     task_pool, _ = TaskPool.objects.get_or_create(name="Общий пул")
-    unfinished = shift.tasks.filter(status__in=["pending", "in_progress"])  # QuerySet
+    unfinished = shift.tasks.filter(
+        status__in=[
+            Task.Status.PENDING,
+            Task.Status.IN_PROGRESS,
+            Task.Status.PAUSED,
+        ]
+    )
     returned_count = 0
 
-    # Будущие события по возвратам задач
-    task_events: list[tuple[str, dict, dict]] = []
+    task_events: list[tuple[str, dict, dict, str]] = []
 
     for task in unfinished:
         prev_employee = task.assigned_to
 
-        # Снимок "до" для задачи
         before = {
             "shift_id": str(shift.id),
             "assignee_id": str(prev_employee.id) if prev_employee else None,
             "status": task.status,
         }
 
-        # Изменяем задачу
         task.assigned_to = None
-        task.status = "pending"
+        task.status = Task.Status.PENDING
         task.shift = None
         task.task_pool = task_pool
         task.save(update_fields=["assigned_to", "status", "shift", "task_pool", "updated_at"])
         returned_count += 1
 
-        # Снимок "после" для задачи
         after = {
             "shift_id": None,
             "assignee_id": None,
-            "status": "pending",
+            "status": Task.Status.PENDING,
             "task_pool_id": str(task_pool.id),
         }
 
-        task_events.append((str(task.id), before, after))
-
         timestamp = timezone.now()
+
+        task_events.append((
+            str(task.id),
+            before,
+            after,
+            timestamp.isoformat(),
+        ))
 
         if prev_employee:
             TaskAssignmentLog.objects.create(
@@ -222,23 +235,18 @@ def close_shift(shift: Shift) -> int:
                 note="Снята и возвращена в пул при завершении смены",
             )
 
-    # Освободить всех сотрудников по этой смене
     EmployeeShiftStats.objects.filter(shift=shift).update(is_busy=False)
 
-    # доменный метод модели: проставит end_time/is_active
     shift.close()
 
-    # Снимок "после" для смены
     after_shift = {
         "is_active": shift.is_active,
         "end_time": shift.end_time.isoformat() if shift.end_time else None,
-        "actual_end_time": shift.actual_end_time.isoformat() if shift.end_time else None,
+        "actual_end_time": shift.actual_end_time.isoformat() if shift.actual_end_time else None,
     }
 
-    # Планируем аудит после коммита
     def _enqueue_audit():
-        # События по задачам
-        for eid, b, a in task_events:
+        for eid, b, a, timestamp in task_events:
             record_event(
                 actor_type="system",
                 actor_id="service:shifts",
@@ -247,9 +255,14 @@ def close_shift(shift: Shift) -> int:
                 action="RETURN_TO_POOL",
                 before=b,
                 after=a,
-                meta={"source": "service", "func": "close_shift", "shift_id": str(shift.id), "timestamp": timestamp.isoformat()},
+                meta={
+                    "source": "service",
+                    "func": "close_shift",
+                    "shift_id": str(shift.id),
+                    "timestamp": timestamp,
+                },
             )
-        # Итоговое событие закрытия смены
+
         record_event(
             actor_type="system",
             actor_id="service:shifts",
@@ -263,7 +276,6 @@ def close_shift(shift: Shift) -> int:
 
     transaction.on_commit(_enqueue_audit)
 
-    # WS уведомление
     channel_layer = get_channel_layer()
     async_to_sync(channel_layer.group_send)(
         "task_updates",
