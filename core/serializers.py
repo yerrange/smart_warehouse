@@ -314,16 +314,19 @@ class CargoCreateSerializer(serializers.ModelSerializer):
             sku_name_snapshot=sku.name,
             container_type=validated_data["container_type"],
             units=validated_data["units"],
+            weight_kg=validated_data["weight_kg"],
+            volume_m3=validated_data["volume_m3"],
             status=Cargo.Status.CREATED,
             handling_state=Cargo.HandlingState.IDLE,
         )
 
         CargoEvent.objects.create(
             cargo=cargo,
-            event_type="created",
+            event_type=CargoEvent.EventType.CREATED,
             from_slot=None,
             to_slot=None,
             quantity=cargo.units or 0,
+            timestamp=cargo.created_at,
             note="Груз создан",
         )
         return cargo
