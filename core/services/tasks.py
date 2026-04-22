@@ -85,7 +85,11 @@ def assign_task_to_best_employee(task: Task, shift: Shift | None):
     )
 
     # Отфильтруем по квалификациям
-    eligible = [s for s in stats_qs if employee_has_all_qualifications(s.employee, task)]
+    eligible = [
+        s for s
+        in stats_qs
+        if employee_has_all_qualifications(s.employee, task)
+    ]
     if not eligible:
         return None
 
@@ -266,6 +270,7 @@ def assign_task_manually(task: Task, employee_code: str) -> None:
     prev_assigned_at = getattr(task, "assigned_at", None)
 
     timestamp = now()
+    was_active = task.status in (Task.Status.IN_PROGRESS, Task.Status.PAUSED)
 
     # Если задача была в работе у другого сотрудника, освобождаем его
     if prev_assignee_id and prev_assignee_id != employee.id:
@@ -274,7 +279,7 @@ def assign_task_manually(task: Task, employee_code: str) -> None:
                 employee_id=prev_assignee_id,
                 shift=task.shift
             )
-            if task.status in (Task.Status.IN_PROGRESS, Task.Status.PAUSED):
+            if was_active:
                 prev_stats.is_busy = False
                 prev_stats.last_task_at = timestamp
                 prev_stats.save(update_fields=["is_busy", "last_task_at"])
@@ -284,15 +289,33 @@ def assign_task_manually(task: Task, employee_code: str) -> None:
     # Переназначение всегда возвращает задачу в pending
     task.assigned_to = employee
     task.status = Task.Status.PENDING
+    task.started_at = None
     task.assigned_at = timestamp
     task.updated_at = timestamp
     task.save(
-        update_fields=["assigned_to", "status", "assigned_at", "updated_at"]
+        update_fields=[
+            "assigned_to",
+            "status",
+            "started_at",
+            "assigned_at",
+            "updated_at",
+        ]
     )
 
-    new_stats.task_assigned_count = (new_stats.task_assigned_count or 0) + 1
-    new_stats.last_task_at = timestamp
-    new_stats.save(update_fields=["task_assigned_count", "last_task_at"])
+    # Если это грузовая задача и после переназначения не осталось активных задач по грузу,
+    # возвращаем груз в IDLE
+    if task.cargo_id and was_active:
+        has_active = task.cargo.task_set.filter(
+            status__in=[Task.Status.IN_PROGRESS, Task.Status.PAUSED]
+        ).exists()
+        if not has_active and task.cargo.handling_state != Cargo.HandlingState.IDLE:
+            task.cargo.handling_state = Cargo.HandlingState.IDLE
+            task.cargo.updated_at = timestamp
+            task.cargo.save(update_fields=["handling_state", "updated_at"])
+
+        new_stats.task_assigned_count = (new_stats.task_assigned_count or 0) + 1
+        new_stats.last_task_at = timestamp
+        new_stats.save(update_fields=["task_assigned_count", "last_task_at"])
 
     TaskAssignmentLog.objects.create(
         task=task,
@@ -320,16 +343,21 @@ def assign_task_manually(task: Task, employee_code: str) -> None:
     }
 
     entity_id = str(task.id)
-    transaction.on_commit(lambda eid=entity_id, b=before, a=after, m=meta: record_event(
-        actor_type="system",
-        actor_id="api",
-        entity_type="Task",
-        entity_id=eid,
-        action="ASSIGN",
-        before=b,
-        after=a,
-        meta=m,
-    ))
+    transaction.on_commit(
+        lambda eid=entity_id,
+        b=before,
+        a=after,
+        m=meta: record_event(
+            actor_type="system",
+            actor_id="api",
+            entity_type="Task",
+            entity_id=eid,
+            action="ASSIGN",
+            before=b,
+            after=a,
+            meta=m,
+        )
+    )
 
     # WS
     channel_layer = get_channel_layer()
@@ -389,16 +417,21 @@ def start_task(task: Task) -> bool:
     }
 
     entity_id = str(task.id)
-    transaction.on_commit(lambda eid=entity_id, b=before, a=after, m=meta: record_event(
-        actor_type="system",
-        actor_id="api",
-        entity_type="Task",
-        entity_id=eid,
-        action="START",
-        before=b,
-        after=a,
-        meta=m,
-    ))
+    transaction.on_commit(
+        lambda eid=entity_id,
+        b=before,
+        a=after,
+        m=meta: record_event(
+            actor_type="system",
+            actor_id="api",
+            entity_type="Task",
+            entity_id=eid,
+            action="START",
+            before=b,
+            after=a,
+            meta=m,
+        )
+    )
 
     channel_layer = get_channel_layer()
     async_to_sync(channel_layer.group_send)(
@@ -488,16 +521,21 @@ def complete_task(task: Task) -> bool:
     }
 
     entity_id = str(task.id)
-    transaction.on_commit(lambda eid=entity_id, b=before, a=after, m=meta: record_event(
-        actor_type="system",
-        actor_id="api",
-        entity_type="Task",
-        entity_id=eid,
-        action="COMPLETE",
-        before=b,
-        after=a,
-        meta=m,
-    ))
+    transaction.on_commit(
+        lambda eid=entity_id,
+        b=before,
+        a=after,
+        m=meta: record_event(
+            actor_type="system",
+            actor_id="api",
+            entity_type="Task",
+            entity_id=eid,
+            action="COMPLETE",
+            before=b,
+            after=a,
+            meta=m,
+        )
+    )
 
     channel_layer = get_channel_layer()
     async_to_sync(channel_layer.group_send)(
