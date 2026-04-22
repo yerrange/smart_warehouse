@@ -2,6 +2,7 @@ from rest_framework import serializers
 from core.models import (
     Shift,
     Employee,
+    EmployeeShiftStats,
     Task,
     TaskAssignmentLog,
     Qualification,
@@ -12,11 +13,10 @@ from core.models import (
     CargoEvent,
 )
 from django.db import transaction
-from datetime import datetime
 from core.services import cargos as cargo_service
-from django.utils import timezone
 
 # === Работники и смены ===
+
 
 class QualificationShortSerializer(serializers.ModelSerializer):
     class Meta:
@@ -35,7 +35,14 @@ class EmployeeSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Employee
-        fields = ["id", "employee_code", "first_name", "last_name", "qualifications", "is_active"]
+        fields = [
+            "id",
+            "employee_code",
+            "first_name",
+            "last_name",
+            "qualifications",
+            "is_active"
+        ]
 
 
 class ShiftSerializer(serializers.ModelSerializer):
@@ -44,7 +51,36 @@ class ShiftSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Shift
-        fields = ["id", "name", "date", "start_time", "end_time", "is_active", "employees"]
+        fields = [
+            "id",
+            "name",
+            "date",
+            "start_time",
+            "end_time",
+            "is_active",
+            "employees"
+        ]
+
+
+class EmployeeShiftStatsEmployeeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Employee
+        fields = ["id", "employee_code", "first_name", "last_name"]
+
+
+class EmployeeShiftStatsSerializer(serializers.ModelSerializer):
+    employee = EmployeeShiftStatsEmployeeSerializer(read_only=True)
+
+    class Meta:
+        model = EmployeeShiftStats
+        fields = [
+            "employee",
+            "is_busy",
+            "task_assigned_count",
+            "task_completed_count",
+            "shift_score",
+            "last_task_at",
+        ]
 
 
 class ShiftCreateSerializer(serializers.Serializer):
@@ -161,7 +197,6 @@ class TaskCreateSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         qualification_codes = validated_data.pop("required_qualification_codes", [])
-        employee_code = validated_data.pop("assigned_employee_code", None)
         cargo_code = validated_data.pop("cargo_code", None)
 
         if not validated_data.get("task_pool"):
@@ -183,14 +218,6 @@ class TaskCreateSerializer(serializers.ModelSerializer):
         if qualification_codes:
             qualifications = Qualification.objects.filter(code__in=qualification_codes)
             task.required_qualifications.set(qualifications)
-
-        if employee_code:
-            try:
-                employee = Employee.objects.get(employee_code=employee_code)
-            except Employee.DoesNotExist:
-                raise serializers.ValidationError({"assigned_employee_code": "Сотрудник не найден"})
-            task.assigned_to = employee
-            task.save(update_fields=["assigned_to"])
 
         return task
 
@@ -287,16 +314,19 @@ class CargoCreateSerializer(serializers.ModelSerializer):
             sku_name_snapshot=sku.name,
             container_type=validated_data["container_type"],
             units=validated_data["units"],
+            weight_kg=validated_data["weight_kg"],
+            volume_m3=validated_data["volume_m3"],
             status=Cargo.Status.CREATED,
             handling_state=Cargo.HandlingState.IDLE,
         )
 
         CargoEvent.objects.create(
             cargo=cargo,
-            event_type="created",
+            event_type=CargoEvent.EventType.CREATED,
             from_slot=None,
             to_slot=None,
             quantity=cargo.units or 0,
+            timestamp=cargo.created_at,
             note="Груз создан",
         )
         return cargo

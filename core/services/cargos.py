@@ -12,6 +12,7 @@ from core.models import (
     Employee,
     LocationSlot,
     StorageLocation,
+    Task,
 )
 from audit.services import record_event
 from django.utils.timezone import now
@@ -25,13 +26,29 @@ __all__ = ["arrive", "store", "move", "dispatch"]
 # ========================
 
 def _get_employee(employee_code: Optional[str]) -> Optional[Employee]:
-    """Возвращает сотрудника по коду или None, если код не передан."""
+    """
+    Возвращает активного сотрудника по коду или None, если код не передан.
+    """
     if not employee_code:
         return None
     try:
-        return Employee.objects.get(employee_code=employee_code)
+        return Employee.objects.get(
+            employee_code=employee_code,
+            is_active=True
+        )
     except Employee.DoesNotExist:
         raise NotFound("Сотрудник не найден")
+
+
+def _get_audit_actor(employee_code: Optional[str]) -> tuple[str, str]:
+    """
+    Возвращает пару (actor_type, actor_id) для аудита.
+    Если исполнитель известен, фиксируем его код.
+    Иначе считаем действие системным.
+    """
+    if employee_code:
+        return "user", employee_code
+    return "system", "service:cargos"
 
 
 def _get_slot(slot_code: str) -> LocationSlot:
@@ -64,7 +81,24 @@ def _check_slot_free_and_compatible(slot: LocationSlot, cargo: Cargo) -> None:
     if not _slot_is_free(slot):
         raise ValidationError("Слот занят другим грузом")
     if slot.location.slot_size_class != cargo.container_type:
-        raise ValidationError("Неверный класс ячейки для типа контейнера груза")
+        raise ValidationError(
+            "Неверный класс ячейки для типа контейнера груза"
+        )
+
+
+def _set_handling_idle_if_no_active_tasks(cargo: Cargo, timestamp) -> None:
+    """
+    Возвращает груз в состояние IDLE, если для него не осталось активных задач.
+    Нужна для прямых вызовов cargo-сервисов, которые могут идти в обход complete_task().
+    """
+    has_active_tasks = cargo.task_set.filter(
+        status__in=[Task.Status.IN_PROGRESS, Task.Status.PAUSED]
+    ).exists()
+
+    if not has_active_tasks and cargo.handling_state != Cargo.HandlingState.IDLE:
+        cargo.handling_state = Cargo.HandlingState.IDLE
+        cargo.updated_at = timestamp
+        cargo.save(update_fields=["handling_state", "updated_at"])
 
 
 # =================
@@ -99,14 +133,18 @@ def arrive(
         raise ValidationError("Груз уже находится в ячейке")
 
     if cargo.status != Cargo.Status.CREATED:
-        raise ValidationError("Отметить прибытие можно только для груза в статусе 'created'")
+        raise ValidationError(
+            "Отметить прибытие можно только для груза в статусе 'created'"
+        )
 
     slot = _get_slot(to_slot_code)
     _check_slot_free_and_compatible(slot, cargo)
 
     if slot.location.location_type != StorageLocation.LocationType.INBOUND:
         raise ValidationError("Прибытие возможно только в зону INBOUND")
-    
+
+    employee = _get_employee(employee_code)
+
     before = {
         "status": cargo.status,
         "slot_code": None,
@@ -119,13 +157,15 @@ def arrive(
     cargo.updated_at = timestamp
     cargo.save(update_fields=["current_slot", "status", "updated_at"])
 
+    _set_handling_idle_if_no_active_tasks(cargo, timestamp)
+
     event = CargoEvent.objects.create(
         cargo=cargo,
         event_type=CargoEvent.EventType.ARRIVED,
         from_slot=None,
         to_slot=slot,
         quantity=cargo.units,
-        employee=_get_employee(employee_code),
+        employee=employee,
         timestamp=timestamp,
         note=note or "Arrived at inbound dock",
     )
@@ -145,16 +185,25 @@ def arrive(
         "timestamp": timestamp.isoformat(),
     }
     entity_id = str(cargo.id)
-    transaction.on_commit(lambda eid=entity_id, b=before, a=after, m=meta: record_event(
-        actor_type="system",
-        actor_id="api",
-        entity_type="Cargo",
-        entity_id=eid,
-        action="ARRIVE",
-        before=b,
-        after=a,
-        meta=m,
-    ))
+    actor_type, actor_id = _get_audit_actor(employee_code)
+
+    transaction.on_commit(
+        lambda eid=entity_id,
+        b=before,
+        a=after,
+        m=meta,
+        at=actor_type,
+        aid=actor_id: record_event(
+            actor_type=at,
+            actor_id=aid,
+            entity_type="Cargo",
+            entity_id=eid,
+            action="ARRIVE",
+            before=b,
+            after=a,
+            meta=m,
+        )
+    )
     return event
 
 
@@ -185,7 +234,10 @@ def store(
         raise ValidationError("Груз ещё не прибыл (нет ячейки INBOUND)")
 
     if cargo.status != Cargo.Status.ARRIVED:
-        raise ValidationError("Размещение разрешено только из статуса 'arrived' (после прибытия в INBOUND)")
+        raise ValidationError(
+            "Размещение разрешено только из статуса 'arrived' "
+            "(после прибытия в INBOUND)"
+        )
 
     from_slot = cargo.current_slot
     if from_slot.location.location_type != StorageLocation.LocationType.INBOUND:
@@ -196,6 +248,8 @@ def store(
 
     if to_slot.location.location_type != StorageLocation.LocationType.RACK:
         raise ValidationError("Размещать можно только в зону хранения RACK")
+
+    employee = _get_employee(employee_code)
 
     before = {
         "status": cargo.status,
@@ -209,13 +263,15 @@ def store(
     cargo.updated_at = timestamp
     cargo.save(update_fields=["current_slot", "status", "updated_at"])
 
+    _set_handling_idle_if_no_active_tasks(cargo, timestamp)
+
     event = CargoEvent.objects.create(
         cargo=cargo,
         event_type=CargoEvent.EventType.STORED,
         from_slot=from_slot,
         to_slot=to_slot,
         quantity=cargo.units,
-        employee=_get_employee(employee_code),
+        employee=employee,
         timestamp=timestamp,
         note=note or "Putaway to storage",
     )
@@ -235,16 +291,25 @@ def store(
         "timestamp": timestamp.isoformat(),
     }
     entity_id = str(cargo.id)
-    transaction.on_commit(lambda eid=entity_id, b=before, a=after, m=meta: record_event(
-        actor_type="system",
-        actor_id="api",
-        entity_type="Cargo",
-        entity_id=eid,
-        action="STORE",
-        before=b,
-        after=a,
-        meta=m,
-    ))
+    actor_type, actor_id = _get_audit_actor(employee_code)
+
+    transaction.on_commit(
+        lambda eid=entity_id,
+        b=before,
+        a=after,
+        m=meta,
+        at=actor_type,
+        aid=actor_id: record_event(
+            actor_type=at,
+            actor_id=aid,
+            entity_type="Cargo",
+            entity_id=eid,
+            action="STORE",
+            before=b,
+            after=a,
+            meta=m,
+        )
+    )
     return event
 
 
@@ -276,12 +341,19 @@ def move(
         raise ValidationError("Груз не находится в ячейке")
 
     if cargo.status != Cargo.Status.STORED:
-        raise ValidationError("Перемещение доступно только после размещения (статус 'stored')")
+        raise ValidationError(
+            "Перемещение доступно только после размещения (статус 'stored')"
+        )
 
     to_slot = _get_slot(to_slot_code)
-    _check_slot_free_and_compatible(to_slot, cargo)
+    employee = _get_employee(employee_code)
 
     from_slot = cargo.current_slot
+    if from_slot and to_slot.id == from_slot.id:
+        raise ValidationError("Груз уже находится в указанном слоте")
+
+    _check_slot_free_and_compatible(to_slot, cargo)
+
     before = {
         "status": cargo.status,
         "slot_code": from_slot.code if from_slot else None,
@@ -292,13 +364,15 @@ def move(
     cargo.updated_at = timestamp
     cargo.save(update_fields=["current_slot", "updated_at"])
 
+    _set_handling_idle_if_no_active_tasks(cargo, timestamp)
+
     event = CargoEvent.objects.create(
         cargo=cargo,
         event_type=CargoEvent.EventType.MOVED,
         from_slot=from_slot,
         to_slot=to_slot,
         quantity=cargo.units,
-        employee=_get_employee(employee_code),
+        employee=employee,
         timestamp=timestamp,
         note=note or f"Move to {to_slot.location.location_type}",
     )
@@ -318,16 +392,25 @@ def move(
         "timestamp": timestamp.isoformat(),
     }
     entity_id = str(cargo.id)
-    transaction.on_commit(lambda eid=entity_id, b=before, a=after, m=meta: record_event(
-        actor_type="system",
-        actor_id="api",
-        entity_type="Cargo",
-        entity_id=eid,
-        action="MOVE",
-        before=b,
-        after=a,
-        meta=m,
-    ))
+    actor_type, actor_id = _get_audit_actor(employee_code)
+
+    transaction.on_commit(
+        lambda eid=entity_id,
+        b=before,
+        a=after,
+        m=meta,
+        at=actor_type,
+        aid=actor_id: record_event(
+            actor_type=at,
+            actor_id=aid,
+            entity_type="Cargo",
+            entity_id=eid,
+            action="MOVE",
+            before=b,
+            after=a,
+            meta=m,
+        )
+    )
     return event
 
 
@@ -358,27 +441,37 @@ def dispatch(
 
     # Разрешаем отгрузку только из зоны OUTBOUND
     if cargo.current_slot.location.location_type != StorageLocation.LocationType.OUTBOUND:
-        raise ValidationError("Отгрузка разрешена только из зоны OUTBOUND. Переместите груз через /move")
+        raise ValidationError(
+            "Отгрузка разрешена только из зоны OUTBOUND. "
+            "Переместите груз через /move"
+        )
 
     from_slot = cargo.current_slot
     full_qty = cargo.units
     if full_qty <= 0:
-        # На случай неконсистентных данных
         raise ValidationError("У груза отсутствуют единицы для отгрузки")
-    
+
+    employee = _get_employee(employee_code)
+
     before = {
         "status": cargo.status,
         "slot_code": from_slot.code if from_slot else None,
         "units": full_qty,
     }
 
-    # cargo.units = 0
     timestamp = now()
     cargo.status = Cargo.Status.DISPATCHED
     cargo.current_slot = None
     cargo.handling_state = Cargo.HandlingState.IDLE
     cargo.updated_at = timestamp
-    cargo.save(update_fields=["status", "current_slot", "handling_state", "updated_at"])
+    cargo.save(
+        update_fields=[
+            "status",
+            "current_slot",
+            "handling_state",
+            "updated_at"
+        ]
+    )
 
     event = CargoEvent.objects.create(
         cargo=cargo,
@@ -386,15 +479,15 @@ def dispatch(
         from_slot=from_slot,
         to_slot=None,
         quantity=full_qty,
-        employee=_get_employee(employee_code),
+        employee=employee,
         timestamp=timestamp,
         note=note or "",
     )
-    
+
     after = {
         "status": cargo.status,
         "slot_code": None,
-        "units": full_qty,            # доменная логика units не меняет — отражаем фактическое
+        "units": full_qty,  # доменная логика units не меняет — отражаем фактическое
         "cargo_code": cargo.cargo_code,
     }
     meta = {
@@ -406,14 +499,23 @@ def dispatch(
         "timestamp": timestamp.isoformat(),
     }
     entity_id = str(cargo.id)
-    transaction.on_commit(lambda eid=entity_id, b=before, a=after, m=meta: record_event(
-        actor_type="system",
-        actor_id="api",
-        entity_type="Cargo",
-        entity_id=eid,
-        action="DISPATCH",
-        before=b,
-        after=a,
-        meta=m,
-    ))
+    actor_type, actor_id = _get_audit_actor(employee_code)
+
+    transaction.on_commit(
+        lambda eid=entity_id,
+        b=before,
+        a=after,
+        m=meta,
+        at=actor_type,
+        aid=actor_id: record_event(
+            actor_type=at,
+            actor_id=aid,
+            entity_type="Cargo",
+            entity_id=eid,
+            action="DISPATCH",
+            before=b,
+            after=a,
+            meta=m,
+        )
+    )
     return event

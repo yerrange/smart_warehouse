@@ -21,17 +21,19 @@ from core.models import (
 
 # --- Inlines ---
 
+
 class TaskInline(admin.TabularInline):
     model = Task
     extra = 0
     fields = ("name", "task_type", "status", "assigned_to", "shift")
+    readonly_fields = ("assigned_to",)
     show_change_link = True
 
 
 class LocationSlotInline(admin.TabularInline):
     model = LocationSlot
     extra = 0
-    fields = ("index", "code", "size_class")
+    fields = ("index", "code")
     show_change_link = True
 
 
@@ -128,10 +130,14 @@ class StorageLocationAdmin(admin.ModelAdmin):
 
 @admin.register(LocationSlot)
 class LocationSlotAdmin(admin.ModelAdmin):
-    list_display = ("code", "location", "index", "location__slot_size_class", "occupied", "cargo_display")
+    list_display = ("code", "location", "index", "slot_size_class", "occupied", "cargo_display")
     list_filter = ("location__slot_size_class", "location__location_type", "location__zone")
     search_fields = ("code", "location__code")
     ordering = ("location__id", "index")
+
+    def slot_size_class(self, obj):
+        return obj.location.slot_size_class
+    slot_size_class.short_description = "Класс слота"
 
     def occupied(self, obj):
         return Cargo.objects.filter(current_slot=obj).exists()
@@ -191,6 +197,7 @@ class CargoEventAdmin(admin.ModelAdmin):
 
 # === Task / TaskAssignmentLog / TaskPool ===
 
+
 @admin.register(Task)
 class TaskAdmin(admin.ModelAdmin):
     list_display = ("id", "name", "task_type", "status", "priority", "shift", "assigned_to", "difficulty", "cargo")
@@ -198,6 +205,7 @@ class TaskAdmin(admin.ModelAdmin):
     search_fields = ("name", "description", "cargo__cargo_code")
     raw_id_fields = ("assigned_to", "cargo")
     autocomplete_fields = ("required_qualifications",)
+    readonly_fields = ("assigned_to",)
 
     def get_changeform_initial_data(self, request):
         initial = super().get_changeform_initial_data(request)

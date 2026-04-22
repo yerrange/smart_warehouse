@@ -7,10 +7,8 @@ from rest_framework.exceptions import ValidationError, NotFound
 from core.models import (
     Shift,
     TaskPool,
-    TaskAssignmentLog,
     Employee,
     Task,
-    EmployeeShiftStats,
     Cargo,
 )
 from core.serializers import (
@@ -19,6 +17,7 @@ from core.serializers import (
     ShiftCreateSerializer,
     ShiftEmployeeUpdateSerializer,
     EmployeeSerializer,
+    EmployeeShiftStatsSerializer,
     # tasks
     TaskReadSerializer,
     TaskCreateSerializer,
@@ -80,6 +79,19 @@ class ShiftViewSet(viewsets.ReadOnlyModelViewSet):
             return Response({"detail": "Нет активной смены."}, status=404)
         return Response(ShiftSerializer(shift).data)
 
+    @action(detail=True, methods=["get"], url_path="stats")
+    def stats(self, request, pk=None):
+        shift: Shift = self.get_object()
+
+        qs = (
+            shift.employee_stats
+            .select_related("employee")
+            .order_by("-shift_score", "task_completed_count", "employee_id")
+        )
+
+        serializer = EmployeeShiftStatsSerializer(qs, many=True)
+        return Response(serializer.data, status=200)
+
     @action(detail=True, methods=["post"], url_path="start")
     def start_shift(self, request, pk=None):
         shift: Shift = self.get_object()
@@ -87,7 +99,10 @@ class ShiftViewSet(viewsets.ReadOnlyModelViewSet):
             assigned = service_start_shift(shift)
         except ValueError as e:
             return Response({"detail": str(e)}, status=400)
-        return Response({"detail": f"Смена запущена. Назначено из пула: {assigned} задач."}, status=200)
+        return Response(
+            {"detail": f"Смена запущена. Назначено из пула: {assigned} задач."},
+            status=200
+        )
 
     @action(detail=True, methods=["post"], url_path="end")
     def end_shift(self, request, pk=None):
@@ -96,7 +111,10 @@ class ShiftViewSet(viewsets.ReadOnlyModelViewSet):
             returned_count = service_close_shift(shift)
         except ValueError as e:
             return Response({"detail": str(e)}, status=400)
-        return Response({"detail": f"Смена закрыта. В пул задач возвращено: {returned_count}."}, status=200)
+        return Response(
+            {"detail": f"Смена закрыта. В пул задач возвращено: {returned_count}."},
+            status=200
+        )
 
 
 class TaskViewSet(viewsets.ModelViewSet):
@@ -175,10 +193,26 @@ class TaskPoolViewSet(viewsets.ReadOnlyModelViewSet):
     @action(detail=True, methods=["get"], url_path="tasks")
     def tasks(self, request, pk=None):
         pool: TaskPool = self.get_object()
-        qs = pool.tasks.all().select_related("shift", "assigned_to", "cargo")
-        include_final = request.query_params.get("include_final") in ("1", "true", "True")
+        qs = pool.tasks.all().select_related(
+            "shift",
+            "assigned_to",
+            "cargo"
+        )
+        include_final = request.query_params.get("include_final") in (
+            "1",
+            "true",
+            "True"
+        )
+
         if not include_final:
-            qs = qs.exclude(status__in=["completed", "canceled", "expired"])
+            qs = qs.exclude(
+                status__in=[
+                    Task.Status.COMPLETED,
+                    Task.Status.CANCELLED,
+                    Task.Status.FAILED,
+                ]
+            )
+
         qs = qs.order_by("-priority", "created_at")
         return Response(TaskReadSerializer(qs, many=True).data)
 
@@ -190,18 +224,28 @@ class CargoViewSet(viewsets.ModelViewSet):
     lookup_value_regex = "[^/]+"
 
     def get_serializer_class(self):
-        return CargoCreateSerializer if self.action == "create" else CargoReadSerializer
+        return (
+            CargoCreateSerializer if self.action == "create"
+            else CargoReadSerializer
+        )
 
     def _get_cargo(self):
-        return Cargo.objects.get(cargo_code=self.kwargs[self.lookup_field])
-    
+        cargo_code = self.kwargs[self.lookup_field]
+        try:
+            return Cargo.objects.get(cargo_code=cargo_code)
+        except Cargo.DoesNotExist:
+            raise NotFound("Груз не найден")
+
     @action(detail=True, methods=["post"])
     def arrive(self, request, *args, **kwargs):
         cargo = self._get_cargo()
         ser = CargoArriveSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
         event = ser.save(cargo=cargo)
-        return Response(CargoEventSerializer(event).data, status=status.HTTP_200_OK)
+        return Response(
+            CargoEventSerializer(event).data,
+            status=status.HTTP_200_OK
+        )
 
     @action(detail=True, methods=["post"])
     def store(self, request, *args, **kwargs):
@@ -209,7 +253,10 @@ class CargoViewSet(viewsets.ModelViewSet):
         ser = CargoStoreSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
         event = ser.save(cargo=cargo)
-        return Response(CargoEventSerializer(event).data, status=status.HTTP_200_OK)
+        return Response(
+            CargoEventSerializer(event).data,
+            status=status.HTTP_200_OK
+        )
 
     @action(detail=True, methods=["post"])
     def move(self, request, *args, **kwargs):
@@ -217,7 +264,10 @@ class CargoViewSet(viewsets.ModelViewSet):
         ser = CargoMoveSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
         event = ser.save(cargo=cargo)
-        return Response(CargoEventSerializer(event).data, status=status.HTTP_200_OK)
+        return Response(
+            CargoEventSerializer(event).data,
+            status=status.HTTP_200_OK
+        )
 
     @action(detail=True, methods=["post"])
     def dispatch(self, request, *args, **kwargs):
@@ -225,12 +275,15 @@ class CargoViewSet(viewsets.ModelViewSet):
         ser = CargoDispatchSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
         event = ser.save(cargo=cargo)
-        return Response(CargoEventSerializer(event).data, status=status.HTTP_200_OK)
+        return Response(
+            CargoEventSerializer(event).data,
+            status=status.HTTP_200_OK
+        )
 
     @action(detail=True, methods=["get"])
     def events(self, request, *args, **kwargs):
         cargo = self._get_cargo()
-        qs = cargo.events.order_by("-timestamp","id")
+        qs = cargo.events.order_by("-timestamp", "id")
         return Response(CargoEventSerializer(qs, many=True).data)
 
 

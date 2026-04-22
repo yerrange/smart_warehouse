@@ -57,10 +57,16 @@ def assign_task_to_best_employee(task: Task, shift: Shift | None):
     Автоназначение: выбираем сотрудника без параллельных pending-задач.
     Возвращает Employee или None.
     """
-    if task.assigned_to or task.status != "pending" or not shift:
+    if task.assigned_to or task.status != Task.Status.PENDING or not shift:
         return None
 
-    # Подходят только не занятые сотрудники смены И без уже назначенных pending-задач в этой смене
+    # Если задача уже привязана к смене,
+    # назначать её можно только в рамках этой же смены
+    if task.shift_id is not None and task.shift_id != shift.id:
+        return None
+
+    # Подходят только не занятые сотрудники смены
+    # И без уже назначенных pending-задач в этой смене
     stats_qs = (
         EmployeeShiftStats.objects
         .select_related("employee")
@@ -78,12 +84,16 @@ def assign_task_to_best_employee(task: Task, shift: Shift | None):
         .filter(pending_assigned=0)
     )
 
-    # # Отфильтруем по квалификациям
-    eligible = [s for s in stats_qs if employee_has_all_qualifications(s.employee, task)]
+    # Отфильтруем по квалификациям
+    eligible = [
+        s for s
+        in stats_qs
+        if employee_has_all_qualifications(s.employee, task)
+    ]
     if not eligible:
         return None
 
-    # # Сортировка: меньше выполнял / меньше набрал очков
+    # Сортировка: меньше выполнял / меньше набрал очков
     # eligible.sort(key=lambda s: (s.shift_score or 0, s.task_completed_count or 0))
     # selected = eligible[0]
     # employee = selected.employee
@@ -91,7 +101,12 @@ def assign_task_to_best_employee(task: Task, shift: Shift | None):
 
     timestamp = now()  # единый таймштамп – и для ML-фич, и для БД/аудита
 
-    pick = pick_assignee(task=task, shift=shift, eligible_stats=eligible, ts=timestamp)
+    pick = pick_assignee(
+        task=task,
+        shift=shift,
+        eligible_stats=eligible,
+        ts=timestamp
+    )
     if not pick.selected_stats:
         return None
 
@@ -123,7 +138,11 @@ def assign_task_to_best_employee(task: Task, shift: Shift | None):
     # Атомарно назначаем только если задача всё ещё pending и без исполнителя
     updated = (
         Task.objects
-        .filter(pk=task.pk, status="pending", assigned_to__isnull=True)
+        .filter(
+            pk=task.pk,
+            status=Task.Status.PENDING,
+            assigned_to__isnull=True
+        )
         .update(
             assigned_to=employee,
             shift=shift if task.shift_id is None else task.shift,
@@ -143,7 +162,8 @@ def assign_task_to_best_employee(task: Task, shift: Shift | None):
 
     # Обновим счётчики
     selected.task_assigned_count = (selected.task_assigned_count or 0) + 1
-    selected.save(update_fields=["task_assigned_count"])
+    selected.last_task_at = timestamp
+    selected.save(update_fields=["task_assigned_count", "last_task_at"])
 
     # Blockchain Audit — готовим неизменяемые снимки для on_commit
     after = {
@@ -207,37 +227,96 @@ def assign_task_to_best_employee(task: Task, shift: Shift | None):
     return employee
 
 
-
 @transaction.atomic
 def assign_task_manually(task: Task, employee_code: str) -> None:
-    if task.status not in ("pending", "in_progress"):
+    if task.status not in (
+        Task.Status.PENDING,
+        Task.Status.IN_PROGRESS,
+        Task.Status.PAUSED,
+    ):
         raise ValueError("Нельзя назначить задачу с текущим статусом.")
 
+    if not task.shift_id:
+        raise ValueError(
+            "Нельзя вручную назначить задачу, не привязанную к смене."
+        )
+
     try:
-        employee = Employee.objects.get(employee_code=employee_code)
+        employee = Employee.objects.get(
+            employee_code=employee_code,
+            is_active=True
+        )
     except Employee.DoesNotExist:
         raise NotFound("Сотрудник не найден")
+
+    if task.assigned_to_id == employee.id:
+        raise ValueError("Задача уже назначена этому сотруднику.")
+
+    if not employee_has_all_qualifications(employee, task):
+        raise ValueError(
+            "У сотрудника нет требуемых квалификаций для этой задачи."
+        )
+
+    try:
+        new_stats = EmployeeShiftStats.objects.get(
+            employee=employee,
+            shift=task.shift
+        )
+    except EmployeeShiftStats.DoesNotExist:
+        raise ValueError("Сотрудник не входит в состав этой смены.")
 
     prev_assignee_id = task.assigned_to_id
     prev_shift_id = task.shift_id
     prev_assigned_at = getattr(task, "assigned_at", None)
 
     timestamp = now()
+    was_active = task.status in (Task.Status.IN_PROGRESS, Task.Status.PAUSED)
 
-    # Приведём задачу к pending на выбранного сотрудника
+    # Если задача была в работе у другого сотрудника, освобождаем его
+    if prev_assignee_id and prev_assignee_id != employee.id:
+        try:
+            prev_stats = EmployeeShiftStats.objects.get(
+                employee_id=prev_assignee_id,
+                shift=task.shift
+            )
+            if was_active:
+                prev_stats.is_busy = False
+                prev_stats.last_task_at = timestamp
+                prev_stats.save(update_fields=["is_busy", "last_task_at"])
+        except EmployeeShiftStats.DoesNotExist:
+            pass
+
+    # Переназначение всегда возвращает задачу в pending
     task.assigned_to = employee
-    task.status = "pending"
+    task.status = Task.Status.PENDING
+    task.started_at = None
     task.assigned_at = timestamp
     task.updated_at = timestamp
-    task.save(update_fields=["assigned_to", "status", "assigned_at", "updated_at"])
+    task.save(
+        update_fields=[
+            "assigned_to",
+            "status",
+            "started_at",
+            "assigned_at",
+            "updated_at",
+        ]
+    )
 
-    # Если задача в смене — обновить статистику
-    if task.shift_id:
-        stats, _ = EmployeeShiftStats.objects.get_or_create(employee=employee, shift=task.shift)
-        stats.task_assigned_count = (stats.task_assigned_count or 0) + 1
-        stats.save(update_fields=["task_assigned_count"])
+    # Если это грузовая задача и после переназначения не осталось активных задач по грузу,
+    # возвращаем груз в IDLE
+    if task.cargo_id and was_active:
+        has_active = task.cargo.task_set.filter(
+            status__in=[Task.Status.IN_PROGRESS, Task.Status.PAUSED]
+        ).exists()
+        if not has_active and task.cargo.handling_state != Cargo.HandlingState.IDLE:
+            task.cargo.handling_state = Cargo.HandlingState.IDLE
+            task.cargo.updated_at = timestamp
+            task.cargo.save(update_fields=["handling_state", "updated_at"])
 
-    # Человекочитаемый лог для UI
+        new_stats.task_assigned_count = (new_stats.task_assigned_count or 0) + 1
+        new_stats.last_task_at = timestamp
+        new_stats.save(update_fields=["task_assigned_count", "last_task_at"])
+
     TaskAssignmentLog.objects.create(
         task=task,
         employee=employee,
@@ -264,16 +343,21 @@ def assign_task_manually(task: Task, employee_code: str) -> None:
     }
 
     entity_id = str(task.id)
-    transaction.on_commit(lambda eid=entity_id, b=before, a=after, m=meta: record_event(
-        actor_type="system",
-        actor_id="api",
-        entity_type="Task",
-        entity_id=eid,
-        action="ASSIGN",
-        before=b,
-        after=a,
-        meta=m,
-    ))
+    transaction.on_commit(
+        lambda eid=entity_id,
+        b=before,
+        a=after,
+        m=meta: record_event(
+            actor_type="system",
+            actor_id="api",
+            entity_type="Task",
+            entity_id=eid,
+            action="ASSIGN",
+            before=b,
+            after=a,
+            meta=m,
+        )
+    )
 
     # WS
     channel_layer = get_channel_layer()
@@ -285,36 +369,46 @@ def assign_task_manually(task: Task, employee_code: str) -> None:
 
 @transaction.atomic
 def start_task(task: Task) -> bool:
-    if task.status != "pending" or not task.assigned_to:
+    if (
+        task.status != Task.Status.PENDING
+        or not task.assigned_to
+        or not task.shift_id
+    ):
         return False
 
     timestamp = now()
 
     before = {
-        "status": "pending",
+        "status": Task.Status.PENDING,
         "started_at": None,
     }
 
-    task.status = "in_progress"
+    task.status = Task.Status.IN_PROGRESS
     task.started_at = timestamp
     task.updated_at = timestamp
     task.save(update_fields=["status", "started_at", "updated_at"])
 
     if task.task_type in CARGO_TYPES:
         # task.cargo_id, а не task.cargo.id - быстрее и не нагружает БД
-        if task.cargo_id and task.cargo.handling_state != Cargo.HandlingState.PROCESSING:
+        if (
+            task.cargo_id
+            and task.cargo.handling_state != Cargo.HandlingState.PROCESSING
+        ):
             task.cargo.handling_state = Cargo.HandlingState.PROCESSING
             task.cargo.save(update_fields=["handling_state", "updated_at"])
 
     try:
         stats = task.shift.employee_stats.get(employee=task.assigned_to)
         stats.is_busy = True
-        stats.save(update_fields=["is_busy"])
+        stats.last_task_at = timestamp
+        stats.save(update_fields=["is_busy", "last_task_at"])
     except EmployeeShiftStats.DoesNotExist:
-        raise ValidationError("Для сотрудника не инициализирована статистика смены")
+        raise ValidationError(
+            "Для сотрудника не инициализирована статистика смены"
+        )
 
     after = {
-        "status": "in_progress",
+        "status": Task.Status.IN_PROGRESS,
         "started_at": timestamp.isoformat(),
     }
     meta = {
@@ -323,16 +417,21 @@ def start_task(task: Task) -> bool:
     }
 
     entity_id = str(task.id)
-    transaction.on_commit(lambda eid=entity_id, b=before, a=after, m=meta: record_event(
-        actor_type="system",
-        actor_id="api",
-        entity_type="Task",
-        entity_id=eid,
-        action="START",
-        before=b,
-        after=a,
-        meta=m,
-    ))
+    transaction.on_commit(
+        lambda eid=entity_id,
+        b=before,
+        a=after,
+        m=meta: record_event(
+            actor_type="system",
+            actor_id="api",
+            entity_type="Task",
+            entity_id=eid,
+            action="START",
+            before=b,
+            after=a,
+            meta=m,
+        )
+    )
 
     channel_layer = get_channel_layer()
     async_to_sync(channel_layer.group_send)(
@@ -344,7 +443,7 @@ def start_task(task: Task) -> bool:
 
 @transaction.atomic
 def complete_task(task: Task) -> bool:
-    if task.status != "in_progress" or not task.assigned_to:
+    if task.status != Task.Status.IN_PROGRESS or not task.assigned_to:
         return False
 
     # Валидация и доменные операции над Cargo (как было)
@@ -371,11 +470,11 @@ def complete_task(task: Task) -> bool:
     timestamp = now()
 
     before = {
-        "status": "in_progress",
+        "status": Task.Status.IN_PROGRESS,
         "completed_at": None,
     }
 
-    task.status = "completed"
+    task.status = Task.Status.COMPLETED
     task.completed_at = timestamp
     task.updated_at = timestamp
     task.task_pool = None
@@ -400,12 +499,20 @@ def complete_task(task: Task) -> bool:
             stats.is_busy = False
             stats.shift_score = (stats.shift_score or 0) + (task.difficulty or 1)
             stats.task_completed_count = (stats.task_completed_count or 0) + 1
-            stats.save(update_fields=["is_busy", "shift_score", "task_completed_count"])
+            stats.last_task_at = timestamp
+            stats.save(
+                update_fields=[
+                    "is_busy",
+                    "shift_score",
+                    "task_completed_count",
+                    "last_task_at"
+                ]
+            )
         except EmployeeShiftStats.DoesNotExist:
             pass
 
     after = {
-        "status": "completed",
+        "status": Task.Status.COMPLETED,
         "completed_at": timestamp.isoformat(),
     }
     meta = {
@@ -414,16 +521,21 @@ def complete_task(task: Task) -> bool:
     }
 
     entity_id = str(task.id)
-    transaction.on_commit(lambda eid=entity_id, b=before, a=after, m=meta: record_event(
-        actor_type="system",
-        actor_id="api",
-        entity_type="Task",
-        entity_id=eid,
-        action="COMPLETE",
-        before=b,
-        after=a,
-        meta=m,
-    ))
+    transaction.on_commit(
+        lambda eid=entity_id,
+        b=before,
+        a=after,
+        m=meta: record_event(
+            actor_type="system",
+            actor_id="api",
+            entity_type="Task",
+            entity_id=eid,
+            action="COMPLETE",
+            before=b,
+            after=a,
+            meta=m,
+        )
+    )
 
     channel_layer = get_channel_layer()
     async_to_sync(channel_layer.group_send)(
