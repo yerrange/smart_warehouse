@@ -1,8 +1,12 @@
+from pathlib import Path
+
+from django.conf import settings
 from django.shortcuts import render
-from rest_framework import viewsets, status
-from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework.exceptions import ValidationError, NotFound
+from rest_framework.decorators import action, api_view
+from rest_framework import status, viewsets
+
+from audit.models import Block, AuditEvent
 
 from core.models import (
     Shift,
@@ -313,3 +317,49 @@ def shift_stats_view(request):
     2) /api/shifts/<id>/stats/
     """
     return render(request, "core/shift_stats.html")
+
+
+def audit_status_view(request):
+    """
+    Страница мониторинга состояния аудита.
+    Данные подтягиваются через JSON-endpoint.
+    """
+    return render(request, "core/audit_status.html")
+
+
+@api_view(["GET"])
+def audit_status_data(request):
+    """
+    Возвращает текущее состояние подсистемы аудита:
+    - число блоков
+    - число событий
+    - последнюю строку проверки цепочки
+    - последние несколько строк истории проверок
+    """
+    verify_log_path = Path(settings.BASE_DIR) / "audit_verify_results.txt"
+
+    lines = []
+    if verify_log_path.exists():
+        try:
+            with verify_log_path.open("r", encoding="utf-8") as f:
+                lines = [line.strip() for line in f.readlines() if line.strip()]
+        except OSError:
+            lines = []
+
+    latest_line = lines[-1] if lines else ""
+    latest_status = "unknown"
+
+    if latest_line:
+        if "] OK |" in latest_line:
+            latest_status = "ok"
+        elif "] FAIL |" in latest_line:
+            latest_status = "fail"
+
+    data = {
+        "blocks_count": Block.objects.count(),
+        "events_count": AuditEvent.objects.count(),
+        "latest_status": latest_status,
+        "latest_line": latest_line,
+        "recent_checks": lines[-10:],
+    }
+    return Response(data)
