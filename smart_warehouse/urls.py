@@ -28,4 +28,5 @@ urlpatterns = [
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
     path('api/docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
     path('monitoring/live-tasks/', views.live_tasks_view, name="live_tasks"),
+    path('monitoring/shift-stats/', views.shift_stats_view, name="shift_stats"),
 ]
