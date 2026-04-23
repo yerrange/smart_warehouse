@@ -2,162 +2,333 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Live Задачи</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Мониторинг задач</title>
   <style>
-    table { width:100%; border-collapse:collapse; margin-top:20px }
-    th,td { border:1px solid #ccc; padding:8px; text-align:left }
-    th { background:#f0f0f0 }
-    tr.new-task { background:#e8f7e4 }
-    tr.assigned-task { background:#fff3cd }
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace }
+    :root {
+      --border: #d9dde3;
+      --muted: #6b7280;
+      --bg-head: #f4f6f8;
+      --bg-pending: #eef6ff;
+      --bg-progress: #fff7e6;
+      --bg-paused: #f8f1ff;
+      --bg-page: #fafbfc;
+    }
+
+    body {
+      margin: 24px;
+      background: var(--bg-page);
+      color: #1f2937;
+      font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .page-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: end;
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+
+    .page-title {
+      margin: 0;
+      font-size: 28px;
+      line-height: 1.2;
+    }
+
+    .page-subtitle {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .summary {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 20px;
+    }
+
+    .summary-card {
+      min-width: 180px;
+      padding: 12px 14px;
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+    }
+
+    .summary-label {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 4px;
+    }
+
+    .summary-value {
+      font-size: 20px;
+      font-weight: 600;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    th, td {
+      border-bottom: 1px solid var(--border);
+      padding: 10px 12px;
+      text-align: left;
+      vertical-align: top;
+      font-size: 14px;
+    }
+
+    th {
+      background: var(--bg-head);
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    tr:last-child td {
+      border-bottom: none;
+    }
+
+    tr.status-pending {
+      background: var(--bg-pending);
+    }
+
+    tr.status-in_progress {
+      background: var(--bg-progress);
+    }
+
+    tr.status-paused {
+      background: var(--bg-paused);
+    }
+
+    .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+
+    .status-badge {
+      display: inline-block;
+      padding: 3px 8px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: #fff;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .empty-state {
+      padding: 20px;
+      color: var(--muted);
+      font-size: 14px;
+    }
   </style>
 </head>
-<body
-  data-pool-id="{{ pool_id }}"
-  data-fallback-url="{% url 'task-list' %}"
->
-  <h1>🔥 Live Задачи</h1>
+<body data-pool-id="{{ pool_id }}">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Live-задачи</h1>
+      <p class="page-subtitle">
+        Активные задачи из текущего пула с обновлением через WebSocket
+      </p>
+    </div>
+  </div>
 
-  <table id="taskTable">
-    <thead>
-      <tr>
-        <th>ID</th>
-        <th>Название</th>
-        <th>Описание</th>
-        <th>Статус</th>
-        <th>Смена</th>
-        <th>Сотрудник</th>
-        <th>Источник</th>
-      </tr>
-    </thead>
-    <tbody></tbody>
-  </table>
+  <div class="summary">
+    <div class="summary-card">
+      <span class="summary-label">Пул задач</span>
+      <span class="summary-value" id="poolLabel">{{ pool_id|default:"—" }}</span>
+    </div>
+    <div class="summary-card">
+      <span class="summary-label">Задач на экране</span>
+      <span class="summary-value" id="taskCount">0</span>
+    </div>
+  </div>
+
+  <div class="table-wrap">
+    <table id="taskTable">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Название</th>
+          <th>Описание</th>
+          <th>Статус</th>
+          <th>Приоритет</th>
+          <th>Смена</th>
+          <th>Сотрудник</th>
+          <th>Груз</th>
+          <th>Источник</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+    <div id="emptyState" class="empty-state" hidden>Нет активных задач для отображения.</div>
+  </div>
 
   <script>
     const tbody = document.querySelector("#taskTable tbody");
     const poolId = (document.body.dataset.poolId || "").trim();
-    const fallbackUrl = document.body.dataset.fallbackUrl;
+    const taskCountEl = document.getElementById("taskCount");
+    const emptyStateEl = document.getElementById("emptyState");
 
-    // Если poolId есть — берём задачи из пула, иначе — общий список (фолбэк)
-    const API_BASE = poolId ? `/api/task-pools/${poolId}/tasks/` : fallbackUrl;
+    const API_BASE = poolId
+      ? `/api/task-pools/${poolId}/tasks/`
+      : "/api/tasks/";
 
-    // Разрешённые статусы (финальные сервер и так отфильтрует)
-    const ALLOWED_STATUSES = new Set(["new","assigned","accepted","in_progress","pending"]);
+    const VISIBLE_STATUSES = new Set(["pending", "in_progress", "paused"]);
+    const FINAL_STATUSES = new Set(["completed", "cancelled", "failed"]);
 
-    function formatEmployee(emp){
-      if (emp == null) return "-";
-      if (typeof emp === "number" || typeof emp === "string") return `#${emp}`;
-      const code = emp.employee_code ?? emp.code ?? "";
-      const name = [emp.first_name ?? "", emp.last_name ?? ""].join(" ").trim();
-      return (code ? code + (name ? " — " : "") : "") + (name || (code ? "" : "-"));
+    function updateSummary() {
+      const count = tbody.querySelectorAll("tr[data-task-id]").length;
+      taskCountEl.textContent = String(count);
+      emptyStateEl.hidden = count > 0;
     }
 
-    // Универсальный вывод смены — поддерживает id, строку, объект, альтернативные поля
-    function formatShift(task){
-      const s = task.shift ?? task.shift_obj ?? task.shift_info ?? null;
-
-      // если пришёл просто id/строка
-      if (typeof s === "number" || typeof s === "string") return `#${s}`;
-
-      // если пришёл объект
-      if (s && (s.id || s.name || s.date)) {
-        const id = s.id ? `#${s.id}` : "";
-        const name = s.name ?? "";
-        const date = s.date ? `(${s.date})` : "";
-        const parts = [id, name, date].filter(Boolean);
-        return parts.length ? parts.join(" ") : "-";
-      }
-
-      // если бэкенд отдал раздельные поля
-      const sid = task.shift_id ?? task.shift_pk ?? null;
-      const sname = task.shift_name ?? task.shift_title ?? "";
-      const sdate = task.shift_date ?? "";
-      const parts = [];
-      if (sid) parts.push(`#${sid}`);
-      if (sname) parts.push(sname);
-      if (sdate) parts.push(`(${sdate})`);
-      return parts.length ? parts.join(" ") : "-";
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
     }
 
-    function pickTitle(t){ return (t.title ?? t.name ?? "").toString().trim() || "-"; }
-    function pickDescription(t){ return (t.description ?? "").toString().trim() || "-"; }
-    function pickSource(t, row){
-      // Берём строго из модели: source / task_source / origin. Если нет — оставляем прежнее значение в ячейке, иначе "-"
-      const modelSource = t.source ?? t.task_source ?? t.origin;
-      if (modelSource != null && String(modelSource).trim() !== "") return String(modelSource);
+    function formatEmployee(emp) {
+      if (!emp) return "—";
+      const code = emp.employee_code || "";
+      const firstName = emp.first_name || "";
+      const lastName = emp.last_name || "";
+      const fullName = `${firstName} ${lastName}`.trim();
+
+      if (code && fullName) return `${code} — ${fullName}`;
+      if (code) return code;
+      if (fullName) return fullName;
+      return "—";
+    }
+
+    function formatShift(shift) {
+      if (shift == null || shift === "") return "—";
+      return `#${shift}`;
+    }
+
+    function formatCargo(cargo) {
+      if (!cargo) return "—";
+      return cargo.cargo_code || "—";
+    }
+
+    function getRow(taskId) {
+      return tbody.querySelector(`tr[data-task-id="${taskId}"]`);
+    }
+
+    function removeRow(taskId) {
+      const row = getRow(taskId);
       if (row) {
-        const cell = row.querySelector("td:nth-child(7)");
-        if (cell && cell.textContent) return cell.textContent;
+        row.remove();
+        updateSummary();
       }
-      return "-";
     }
-    function getRow(id){ return tbody.querySelector(`tr[data-task-id="${id}"]`); }
 
-    function upsertRow(t){
-      const id = t.id ?? t.pk; if (id == null) return;
-      const status = t.status ?? "-";
-      if (!ALLOWED_STATUSES.has(status)){
-        if (status === "completed"){ const r = getRow(String(id)); if (r) r.remove(); }
+    function upsertRow(task) {
+      const taskId = task?.id;
+      if (taskId == null) return;
+
+      const status = task.status || "";
+      if (FINAL_STATUSES.has(status)) {
+        removeRow(String(taskId));
         return;
       }
 
-      let row = getRow(id);
-      if (!row){
+      if (!VISIBLE_STATUSES.has(status)) {
+        return;
+      }
+
+      let row = getRow(String(taskId));
+      if (!row) {
         row = document.createElement("tr");
-        row.dataset.taskId = id;
+        row.dataset.taskId = String(taskId);
         tbody.prepend(row);
       }
 
-      const employeeObj = t.assigned_to ?? t.employee ?? null;
-      const isInProgress = (status === "in_progress");
-
-      row.classList.toggle("assigned-task", isInProgress || !!employeeObj);
-      row.classList.toggle("new-task", !(isInProgress || !!employeeObj));
-
-      const src = pickSource(t, row);
+      row.className = "";
+      row.classList.add(`status-${status}`);
 
       row.innerHTML = `
-        <td class="mono">${id}</td>
-        <td>${pickTitle(t)}</td>
-        <td>${pickDescription(t)}</td>
-        <td>${status}</td>
-        <td>${formatShift(t)}</td>
-        <td>${formatEmployee(employeeObj)}</td>
-        <td>${src}</td>
+        <td class="mono">${escapeHtml(taskId)}</td>
+        <td>${escapeHtml(task.name || "—")}</td>
+        <td>${escapeHtml(task.description || "—")}</td>
+        <td><span class="status-badge">${escapeHtml(status)}</span></td>
+        <td>${escapeHtml(task.priority ?? "—")}</td>
+        <td>${escapeHtml(formatShift(task.shift))}</td>
+        <td>${escapeHtml(formatEmployee(task.assigned_to))}</td>
+        <td>${escapeHtml(formatCargo(task.cargo))}</td>
+        <td>${escapeHtml(task.source || "—")}</td>
       `;
+
+      updateSummary();
     }
 
-    // 1) начальная загрузка — ТОЛЬКО из пула (или фолбэк)
-    fetch(API_BASE)
-      .then(r => r.json())
-      .then(items => {
-        const list = Array.isArray(items) ? items : (items.results || []);
-        list.filter(t => ALLOWED_STATUSES.has(t.status)).forEach(upsertRow);
-        console.log(`Задачи загружены из ${poolId ? "пула #"+poolId : "общего списка"}:`, list.length);
-      })
-      .catch(err => console.error("Ошибка загрузки:", err));
+    async function loadInitialTasks() {
+      try {
+        const response = await fetch(API_BASE);
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
 
-    // 2) WebSocket — дельты
-    const WS_PATH = "/ws/tasks/";
-    function connectWS(){
-      const scheme = location.protocol === "https:" ? "wss" : "ws";
-      const ws = new WebSocket(`${scheme}://${location.host}${WS_PATH}`);
-      ws.onopen  = () => console.log("WS: connected");
-      ws.onerror = (e) => console.error("WS error:", e);
-      ws.onclose = () => { console.warn("WS closed, retry in 2s…"); setTimeout(connectWS, 2000); };
-      ws.onmessage = (e) => {
-        let data; try { data = JSON.parse(e.data) } catch { return }
-        if (data?.reason === "смена завершена"){ tbody.innerHTML = ""; return }
-        if (data?.reason === "завершено" || data?.status === "completed"){
-          const row = getRow(String(data.id)); if (row) row.remove(); return
-        }
-        if (data && data.id != null){
-          if (!ALLOWED_STATUSES.has(data.status)) return;
-          upsertRow(data);
-        }
+        const payload = await response.json();
+        const tasks = Array.isArray(payload) ? payload : (payload.results || []);
+        tasks.forEach(upsertRow);
+        updateSummary();
+      } catch (error) {
+        console.error("Ошибка начальной загрузки задач:", error);
       }
     }
+
+    function connectWS() {
+      const scheme = location.protocol === "https:" ? "wss" : "ws";
+      const ws = new WebSocket(`${scheme}://${location.host}/ws/tasks/`);
+
+      ws.onopen = () => console.log("WS connected");
+      ws.onerror = (event) => console.error("WS error:", event);
+      ws.onclose = () => {
+        console.warn("WS closed, retry in 2s");
+        setTimeout(connectWS, 2000);
+      };
+
+      ws.onmessage = (event) => {
+        let data;
+        try {
+          data = JSON.parse(event.data);
+        } catch {
+          return;
+        }
+
+        if (data?.reason === "смена завершена") {
+          tbody.innerHTML = "";
+          updateSummary();
+          return;
+        }
+
+        if (data?.id == null) {
+          return;
+        }
+
+        upsertRow(data);
+      };
+    }
+
+    loadInitialTasks();
     connectWS();
   </script>
 </body>

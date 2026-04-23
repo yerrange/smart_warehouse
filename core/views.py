@@ -299,7 +299,17 @@ def live_tasks_view(request):
     """
     pool = TaskPool.objects.filter(is_active=True).first() or TaskPool.objects.first()
     context = {
-        "pool": pool,                       # оставим, если где-то ещё используется
-        "pool_id": pool.id if pool else "", # ГЛАВНОЕ: ID для JS
+        "pool": pool,
+        "pool_id": pool.id if pool else "",
     }
     return render(request, "core/live_tasks.html", context)
+
+
+def shift_stats_view(request):
+    """
+    Страница мониторинга статистики активной смены.
+    Данные подтягиваются через API:
+    1) /api/shifts/active/
+    2) /api/shifts/<id>/stats/
+    """
+    return render(request, "core/shift_stats.html")
