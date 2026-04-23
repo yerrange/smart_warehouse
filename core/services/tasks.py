@@ -313,9 +313,9 @@ def assign_task_manually(task: Task, employee_code: str) -> None:
             task.cargo.updated_at = timestamp
             task.cargo.save(update_fields=["handling_state", "updated_at"])
 
-        new_stats.task_assigned_count = (new_stats.task_assigned_count or 0) + 1
-        new_stats.last_task_at = timestamp
-        new_stats.save(update_fields=["task_assigned_count", "last_task_at"])
+    new_stats.task_assigned_count = (new_stats.task_assigned_count or 0) + 1
+    new_stats.last_task_at = timestamp
+    new_stats.save(update_fields=["task_assigned_count", "last_task_at"])
 
     TaskAssignmentLog.objects.create(
         task=task,
