@@ -1,0 +1,14 @@
+⛔ NO_SHIFTS | tick=e525060c-11da-4de0-934f-f65cc924cc4a | shifts=0 | pool=0 | tried=0 | assigned=0 | back=0 | lost=0 | changed=0 | skip=0 | dur=3.9ms | ts=2026-04-23T11:06:06.239564+00:00
+⛔ NO_SHIFTS | tick=377f9ccb-5276-45f9-84ca-683b3b4c39b3 | shifts=0 | pool=0 | tried=0 | assigned=0 | back=0 | lost=0 | changed=0 | skip=0 | dur=2.2ms | ts=2026-04-23T11:06:11.232436+00:00
+⛔ NO_SHIFTS | tick=1de5f65f-c03c-4c63-ad93-c6caef822bfe | shifts=0 | pool=0 | tried=0 | assigned=0 | back=0 | lost=0 | changed=0 | skip=0 | dur=2.2ms | ts=2026-04-23T11:06:16.233151+00:00
+⛔ NO_SHIFTS | tick=248a8ea2-7e47-4f9d-8884-e564186cb2b9 | shifts=0 | pool=0 | tried=0 | assigned=0 | back=0 | lost=0 | changed=0 | skip=0 | dur=2.2ms | ts=2026-04-23T11:06:21.238551+00:00
+⛔ NO_SHIFTS | tick=7684b9b1-44f4-40e3-bd1e-89b4afad1495 | shifts=0 | pool=0 | tried=0 | assigned=0 | back=0 | lost=0 | changed=0 | skip=0 | dur=2.2ms | ts=2026-04-23T11:06:26.239526+00:00
+⛔ NO_SHIFTS | tick=81907ba6-8db1-4941-af00-08404b3d825d | shifts=0 | pool=0 | tried=0 | assigned=0 | back=0 | lost=0 | changed=0 | skip=0 | dur=1.5ms | ts=2026-04-23T11:06:31.239195+00:00
+⛔ NO_SHIFTS | tick=280eac62-07b3-40cf-b4be-f080f3088405 | shifts=0 | pool=0 | tried=0 | assigned=0 | back=0 | lost=0 | changed=0 | skip=0 | dur=2.2ms | ts=2026-04-23T11:06:36.239931+00:00
+⛔ NO_SHIFTS | tick=d60d20e5-8320-41d6-bf61-46d65a9ad186 | shifts=0 | pool=0 | tried=0 | assigned=0 | back=0 | lost=0 | changed=0 | skip=0 | dur=1.8ms | ts=2026-04-23T11:06:41.241052+00:00
+⛔ NO_SHIFTS | tick=f32f63b3-1d8e-470b-a5d3-8ec9c254b9f2 | shifts=0 | pool=0 | tried=0 | assigned=0 | back=0 | lost=0 | changed=0 | skip=0 | dur=1.6ms | ts=2026-04-23T11:06:46.240486+00:00
+⛔ NO_SHIFTS | tick=098e94f8-422c-4aa1-af67-ec86d4f06115 | shifts=0 | pool=0 | tried=0 | assigned=0 | back=0 | lost=0 | changed=0 | skip=0 | dur=1.5ms | ts=2026-04-23T11:06:51.241355+00:00
+⛔ NO_SHIFTS | tick=83cbb79f-1ff0-4622-9a66-01e52b067f42 | shifts=0 | pool=0 | tried=0 | assigned=0 | back=0 | lost=0 | changed=0 | skip=0 | dur=1.6ms | ts=2026-04-23T11:06:56.241033+00:00
+⛔ NO_SHIFTS | tick=e3c49215-fcb4-4138-b18e-cd5fe48aec8b | shifts=0 | pool=0 | tried=0 | assigned=0 | back=0 | lost=0 | changed=0 | skip=0 | dur=1.5ms | ts=2026-04-23T11:07:01.248511+00:00
+⛔ NO_SHIFTS | tick=051a7f58-2cef-4455-b7cb-736ed8d2f0e8 | shifts=0 | pool=0 | tried=0 | assigned=0 | back=0 | lost=0 | changed=0 | skip=0 | dur=1.5ms | ts=2026-04-23T11:07:06.265875+00:00
+⛔ NO_SHIFTS | tick=5602e82c-3883-4691-90d7-b24bded87045 | shifts=0 | pool=0 | tried=0 | assigned=0 | back=0 | lost=0 | changed=0 | skip=0 | dur=1.5ms | ts=2026-04-23T11:07:11.248879+00:00

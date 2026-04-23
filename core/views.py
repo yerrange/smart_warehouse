@@ -363,3 +363,62 @@ def audit_status_data(request):
         "recent_checks": lines[-10:],
     }
     return Response(data)
+
+
+def background_status_view(request):
+    """
+    Страница мониторинга фонового контура назначения задач.
+    """
+    return render(request, "core/background_status.html")
+
+
+@api_view(["GET"])
+def background_status_data(request):
+    """
+    Возвращает текущее состояние фонового контура:
+    - число активных смен
+    - число задач в пуле
+    - число задач in_progress / paused
+    - последнюю строку тика
+    - последние несколько строк истории
+    """
+    tick_log_path = Path(settings.BASE_DIR) / "background_tick_results.txt"
+
+    lines = []
+    if tick_log_path.exists():
+        try:
+            with tick_log_path.open("r", encoding="utf-8") as f:
+                lines = [line.strip() for line in f.readlines() if line.strip()]
+        except OSError:
+            lines = []
+
+    latest_line = lines[-1] if lines else ""
+    latest_status = "unknown"
+
+    if latest_line:
+        if "✅ ASSIGNED" in latest_line:
+            latest_status = "assigned"
+        elif "💤 IDLE" in latest_line:
+            latest_status = "idle"
+        elif "⚠️ NO_MATCH" in latest_line:
+            latest_status = "no_match"
+        elif "⛔ NO_SHIFTS" in latest_line:
+            latest_status = "no_shifts"
+
+    data = {
+        "active_shifts_count": Shift.objects.filter(is_active=True).count(),
+        "pool_pending_count": Task.objects.filter(
+            status=Task.Status.PENDING,
+            shift__isnull=True,
+        ).count(),
+        "in_progress_count": Task.objects.filter(
+            status=Task.Status.IN_PROGRESS
+        ).count(),
+        "paused_count": Task.objects.filter(
+            status=Task.Status.PAUSED
+        ).count(),
+        "latest_status": latest_status,
+        "latest_line": latest_line,
+        "recent_ticks": lines[-10:],
+    }
+    return Response(data)

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from time import perf_counter
 from typing import Optional, Dict, List
 
 from celery import shared_task
 from celery.utils.log import get_task_logger
+from django.conf import settings
 from django.db import transaction
 from django.db.models import Q
 from django.utils.timezone import now
@@ -15,6 +17,15 @@ from core.services.tasks import assign_task_to_best_employee
 
 # Фиксированное имя логгера (под него настроен LOGGING в settings.py)
 logger = get_task_logger("core.celery_tasks")
+
+
+TICK_LOG_PATH = Path(settings.BASE_DIR) / "background_tick_results.txt"
+
+
+def _append_tick_result_line(line: str) -> None:
+    TICK_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with TICK_LOG_PATH.open("a", encoding="utf-8") as f:
+        f.write(line + "\n")
 
 # Параметры можно переопределять через переменные окружения
 BATCH_SIZE = int(os.getenv("ASSIGN_BATCH_SIZE", "100"))
@@ -161,7 +172,16 @@ def assign_pending_tasks_tick(self):
 
     if not shifts:
         dur_ms = (perf_counter() - started) * 1000.0
-        logger.info(_summary_line(getattr(self.request, "id", None), stats, 0, 0, dur_ms, ts.isoformat()))
+        summary = _summary_line(
+            getattr(self.request, "id", None),
+            stats,
+            0,
+            0,
+            dur_ms,
+            ts.isoformat(),
+        )
+        logger.info(summary)
+        _append_tick_result_line(summary)
         return 0
 
     tasks = _pool_tasks()
@@ -174,7 +194,16 @@ def assign_pending_tasks_tick(self):
             continue
 
     dur_ms = (perf_counter() - started) * 1000.0
-    logger.info(_summary_line(getattr(self.request, "id", None), stats, len(shifts), len(tasks), dur_ms, ts.isoformat()))
+    summary = _summary_line(
+        getattr(self.request, "id", None),
+        stats,
+        len(shifts),
+        len(tasks),
+        dur_ms,
+        ts.isoformat(),
+    )
+    logger.info(summary)
+    _append_tick_result_line(summary)
     return int(stats["assigned"])  # на всякий случай приводим к int
 
 @shared_task

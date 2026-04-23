@@ -31,4 +31,6 @@ urlpatterns = [
     path('monitoring/shift-stats/', views.shift_stats_view, name="shift_stats"),
     path('monitoring/audit-status/', views.audit_status_view, name="audit_status"),
     path('monitoring/api/audit-status/', views.audit_status_data, name="audit_status_data"),
+    path('monitoring/background-status/', views.background_status_view, name="background_status"),
+    path('monitoring/api/background-status/', views.background_status_data, name="background_status_data"),
 ]
