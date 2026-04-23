@@ -16,8 +16,9 @@ class PickResult:
     selected_stats: Optional[EmployeeShiftStats]
     mode: str  # "ml" | "heuristic" | "heuristic_fallback"
     predicted_minutes: Optional[float] = None
+    adjusted_score: Optional[float] = None
     error: Optional[str] = None
-    topk: Optional[list[dict[str, Any]]] = None  # список лучших кандидатов
+    topk: Optional[list[dict[str, Any]]] = None
 
 
 def _heuristic_pick(eligible_stats: list[EmployeeShiftStats]) -> PickResult:
@@ -35,6 +36,38 @@ def _heuristic_pick(eligible_stats: list[EmployeeShiftStats]) -> PickResult:
             }
         ],
     )
+
+
+def _safe_norm(value: int, max_value: int) -> float:
+    if max_value <= 0:
+        return 0.0
+    return float(value) / float(max_value)
+
+
+def _balance_penalty(
+    *,
+    stats: EmployeeShiftStats,
+    eligible_stats: list[EmployeeShiftStats],
+) -> float:
+    max_assigned = max(int(s.task_assigned_count or 0) for s in eligible_stats) if eligible_stats else 0
+    max_completed = max(int(s.task_completed_count or 0) for s in eligible_stats) if eligible_stats else 0
+    max_score = max(int(s.shift_score or 0) for s in eligible_stats) if eligible_stats else 0
+
+    assigned_norm = _safe_norm(int(stats.task_assigned_count or 0), max_assigned)
+    completed_norm = _safe_norm(int(stats.task_completed_count or 0), max_completed)
+    score_norm = _safe_norm(int(stats.shift_score or 0), max_score)
+
+    assigned_w = float(getattr(settings, "TASK_ASSIGNER_BALANCE_ASSIGNED_WEIGHT", 0.20))
+    completed_w = float(getattr(settings, "TASK_ASSIGNER_BALANCE_COMPLETED_WEIGHT", 0.10))
+    score_w = float(getattr(settings, "TASK_ASSIGNER_BALANCE_SCORE_WEIGHT", 0.25))
+    max_penalty = float(getattr(settings, "TASK_ASSIGNER_BALANCE_MAX_PENALTY", 0.35))
+
+    raw_penalty = (
+        assigned_norm * assigned_w
+        + completed_norm * completed_w
+        + score_norm * score_w
+    )
+    return min(raw_penalty, max_penalty)
 
 
 def pick_assignee(
@@ -65,14 +98,24 @@ def pick_assignee(
 
         scored = []
         for s, pred in zip(eligible_stats, preds):
+            pred_minutes = float(pred)
+            balance_penalty = _balance_penalty(
+                stats=s,
+                eligible_stats=eligible_stats,
+            )
+            adjusted_score = pred_minutes * (1.0 + balance_penalty)
+
             scored.append(
                 (
-                    float(pred),
+                    adjusted_score,
+                    pred_minutes,
                     s,
                     {
                         "employee_id": s.employee_id,
                         "employee_code": getattr(s.employee, "employee_code", None),
-                        "predicted_minutes": float(pred),
+                        "predicted_minutes": pred_minutes,
+                        "adjusted_score": adjusted_score,
+                        "balance_penalty": round(balance_penalty, 4),
                         "emp_task_assigned_count": int(s.task_assigned_count or 0),
                         "emp_task_completed_count": int(s.task_completed_count or 0),
                         "emp_shift_score": int(s.shift_score or 0),
@@ -80,15 +123,16 @@ def pick_assignee(
                 )
             )
 
-        scored.sort(key=lambda x: x[0])  # меньше минут – лучше
-        best_pred, best_stats, _ = scored[0]
+        scored.sort(key=lambda x: x[0])  # меньше adjusted_score – лучше
+        best_adjusted, best_pred, best_stats, _ = scored[0]
 
-        topk = [item[2] for item in scored[: max(1, topk_n)]]
+        topk = [item[3] for item in scored[: max(1, topk_n)]]
 
         return PickResult(
             selected_stats=best_stats,
             mode="ml",
             predicted_minutes=float(best_pred),
+            adjusted_score=float(best_adjusted),
             topk=topk,
         )
 
