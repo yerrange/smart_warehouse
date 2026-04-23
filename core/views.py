@@ -296,6 +296,18 @@ class EmployeeViewSet(viewsets.ModelViewSet):
     serializer_class = EmployeeSerializer
 
 
+def monitoring_dashboard_view(request):
+    """
+    Общая страница мониторинга.
+    Показывает краткие summary-блоки и ссылки на развёрнутые страницы.
+    """
+    pool = TaskPool.objects.filter(is_active=True).first() or TaskPool.objects.first()
+    context = {
+        "pool_id": pool.id if pool else "",
+    }
+    return render(request, "core/monitoring_dashboard.html", context)
+
+
 def live_tasks_view(request):
     """
     Рендерим страницу и передаём pool_id (если пул существует).

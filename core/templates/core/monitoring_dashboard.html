@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Мониторинг системы</title>
+  <style>
+    :root {
+      --border: #d9dde3;
+      --muted: #6b7280;
+      --bg-page: #fafbfc;
+      --bg-card: #ffffff;
+      --bg-head: #f4f6f8;
+      --ok-bg: #eef8f0;
+      --ok-text: #166534;
+      --fail-bg: #fff1f1;
+      --fail-text: #991b1b;
+      --idle-bg: #eef6ff;
+      --idle-text: #1d4ed8;
+      --warn-bg: #fff7e6;
+      --warn-text: #92400e;
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+    }
+
+    body {
+      margin: 24px;
+      background: var(--bg-page);
+      color: #1f2937;
+      font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .page-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: end;
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+
+    .page-title {
+      margin: 0;
+      font-size: 30px;
+      line-height: 1.2;
+    }
+
+    .page-subtitle {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .top-summary {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 20px;
+    }
+
+    .summary-card {
+      min-width: 180px;
+      padding: 12px 14px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      box-shadow: var(--shadow);
+    }
+
+    .summary-label {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 4px;
+    }
+
+    .summary-value {
+      font-size: 20px;
+      font-weight: 600;
+    }
+
+    .dashboard-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 16px;
+    }
+
+    .panel-link {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    .panel {
+      height: 100%;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      transition: transform 0.12s ease, box-shadow 0.12s ease;
+    }
+
+    .panel-link:hover .panel {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.06);
+    }
+
+    .panel-head {
+      padding: 14px 16px;
+      background: var(--bg-head);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .panel-title {
+      margin: 0;
+      font-size: 18px;
+      line-height: 1.2;
+    }
+
+    .panel-subtitle {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .panel-body {
+      padding: 16px;
+    }
+
+    .metric-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .metric-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: center;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .metric-row:last-child {
+      border-bottom: none;
+      padding-bottom: 0;
+    }
+
+    .metric-name {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .metric-value {
+      font-weight: 600;
+      text-align: right;
+    }
+
+    .status-chip {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      border: 1px solid var(--border);
+      background: #fff;
+    }
+
+    .status-chip.ok {
+      background: var(--ok-bg);
+      color: var(--ok-text);
+    }
+
+    .status-chip.fail {
+      background: var(--fail-bg);
+      color: var(--fail-text);
+    }
+
+    .status-chip.idle {
+      background: var(--idle-bg);
+      color: var(--idle-text);
+    }
+
+    .status-chip.warn {
+      background: var(--warn-bg);
+      color: var(--warn-text);
+    }
+
+    .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      word-break: break-word;
+    }
+
+    .panel-footer {
+      margin-top: 14px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body data-pool-id="{{ pool_id }}">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Мониторинг системы</h1>
+      <p class="page-subtitle">
+        Сводный экран по задачам, смене, аудиту и фоновому контуру. По клику открывается развёрнутая страница раздела.
+      </p>
+    </div>
+  </div>
+
+  <div class="top-summary">
+    <div class="summary-card">
+      <span class="summary-label">Пул задач</span>
+      <span class="summary-value" id="poolLabel">{{ pool_id|default:"—" }}</span>
+    </div>
+    <div class="summary-card">
+      <span class="summary-label">Активная смена</span>
+      <span class="summary-value" id="activeShiftTop">—</span>
+    </div>
+    <div class="summary-card">
+      <span class="summary-label">Последний аудит</span>
+      <span class="summary-value" id="auditTop">—</span>
+    </div>
+    <div class="summary-card">
+      <span class="summary-label">Последний фон. тик</span>
+      <span class="summary-value" id="backgroundTop">—</span>
+    </div>
+  </div>
+
+  <div class="dashboard-grid">
+    <a class="panel-link" href="{% url 'live_tasks' %}">
+      <section class="panel">
+        <div class="panel-head">
+          <h2 class="panel-title">Live-задачи</h2>
+          <p class="panel-subtitle">Текущие активные задачи из пула</p>
+        </div>
+        <div class="panel-body">
+          <div class="metric-list">
+            <div class="metric-row">
+              <span class="metric-name">Отображаемых задач</span>
+              <span class="metric-value" id="liveTasksCount">0</span>
+            </div>
+            <div class="metric-row">
+              <span class="metric-name">В работе</span>
+              <span class="metric-value" id="liveInProgressCount">0</span>
+            </div>
+            <div class="metric-row">
+              <span class="metric-name">На паузе</span>
+              <span class="metric-value" id="livePausedCount">0</span>
+            </div>
+          </div>
+          <div class="panel-footer">Открыть развёрнутый live-мониторинг задач</div>
+        </div>
+      </section>
+    </a>
+
+    <a class="panel-link" href="{% url 'shift_stats' %}">
+      <section class="panel">
+        <div class="panel-head">
+          <h2 class="panel-title">Активная смена</h2>
+          <p class="panel-subtitle">Краткая статистика сотрудников</p>
+        </div>
+        <div class="panel-body">
+          <div class="metric-list">
+            <div class="metric-row">
+              <span class="metric-name">Смена</span>
+              <span class="metric-value" id="shiftNameCard">—</span>
+            </div>
+            <div class="metric-row">
+              <span class="metric-name">Дата</span>
+              <span class="metric-value" id="shiftDateCard">—</span>
+            </div>
+            <div class="metric-row">
+              <span class="metric-name">Сотрудников</span>
+              <span class="metric-value" id="shiftEmployeeCount">0</span>
+            </div>
+            <div class="metric-row">
+              <span class="metric-name">Заняты сейчас</span>
+              <span class="metric-value" id="shiftBusyCount">0</span>
+            </div>
+          </div>
+          <div class="panel-footer">Открыть подробную статистику смены</div>
+        </div>
+      </section>
+    </a>
+
+    <a class="panel-link" href="{% url 'audit_status' %}">
+      <section class="panel">
+        <div class="panel-head">
+          <h2 class="panel-title">Аудит</h2>
+          <p class="panel-subtitle">Сводка по цепочке и последней проверке</p>
+        </div>
+        <div class="panel-body">
+          <div class="metric-list">
+            <div class="metric-row">
+              <span class="metric-name">Блоков</span>
+              <span class="metric-value" id="auditBlocksCount">0</span>
+            </div>
+            <div class="metric-row">
+              <span class="metric-name">Событий</span>
+              <span class="metric-value" id="auditEventsCount">0</span>
+            </div>
+            <div class="metric-row">
+              <span class="metric-name">Последний статус</span>
+              <span class="metric-value">
+                <span class="status-chip" id="auditStatusChip">—</span>
+              </span>
+            </div>
+          </div>
+          <div class="panel-footer mono" id="auditLatestLine">Нет данных о последних проверках.</div>
+        </div>
+      </section>
+    </a>
+
+    <a class="panel-link" href="{% url 'background_status' %}">
+      <section class="panel">
+        <div class="panel-head">
+          <h2 class="panel-title">Фоновый контур</h2>
+          <p class="panel-subtitle">Автоназначение и история последних тиков</p>
+        </div>
+        <div class="panel-body">
+          <div class="metric-list">
+            <div class="metric-row">
+              <span class="metric-name">Активные смены</span>
+              <span class="metric-value" id="bgActiveShiftsCount">0</span>
+            </div>
+            <div class="metric-row">
+              <span class="metric-name">Pending в пуле</span>
+              <span class="metric-value" id="bgPendingCount">0</span>
+            </div>
+            <div class="metric-row">
+              <span class="metric-name">Последний статус</span>
+              <span class="metric-value">
+                <span class="status-chip" id="bgStatusChip">—</span>
+              </span>
+            </div>
+          </div>
+          <div class="panel-footer mono" id="bgLatestLine">Нет данных о последних тиках.</div>
+        </div>
+      </section>
+    </a>
+  </div>
+
+  <script>
+    const poolId = (document.body.dataset.poolId || "").trim();
+
+    function setText(id, value) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.textContent = value ?? "—";
+    }
+
+    function setAuditChip(status) {
+      const chip = document.getElementById("auditStatusChip");
+      if (!chip) return;
+
+      chip.className = "status-chip";
+      if (status === "ok") {
+        chip.classList.add("ok");
+        chip.textContent = "OK";
+      } else if (status === "fail") {
+        chip.classList.add("fail");
+        chip.textContent = "FAIL";
+      } else {
+        chip.classList.add("idle");
+        chip.textContent = "—";
+      }
+    }
+
+    function setBackgroundChip(status) {
+      const chip = document.getElementById("bgStatusChip");
+      if (!chip) return;
+
+      chip.className = "status-chip";
+      if (status === "assigned") {
+        chip.classList.add("ok");
+        chip.textContent = "ASSIGNED";
+      } else if (status === "idle") {
+        chip.classList.add("idle");
+        chip.textContent = "IDLE";
+      } else if (status === "no_match") {
+        chip.classList.add("warn");
+        chip.textContent = "NO_MATCH";
+      } else if (status === "no_shifts") {
+        chip.classList.add("fail");
+        chip.textContent = "NO_SHIFTS";
+      } else {
+        chip.classList.add("idle");
+        chip.textContent = "—";
+      }
+    }
+
+    async function loadLiveTasksSummary() {
+      const url = poolId ? `/api/task-pools/${poolId}/tasks/` : "/api/tasks/";
+      try {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+        const payload = await response.json();
+        const tasks = Array.isArray(payload) ? payload : (payload.results || []);
+
+        const visible = tasks.filter(t => ["pending", "in_progress", "paused"].includes(t.status));
+        const inProgress = visible.filter(t => t.status === "in_progress").length;
+        const paused = visible.filter(t => t.status === "paused").length;
+
+        setText("liveTasksCount", String(visible.length));
+        setText("liveInProgressCount", String(inProgress));
+        setText("livePausedCount", String(paused));
+      } catch (error) {
+        console.error("Ошибка загрузки summary live-задач:", error);
+        setText("liveTasksCount", "—");
+        setText("liveInProgressCount", "—");
+        setText("livePausedCount", "—");
+      }
+    }
+
+    async function loadShiftSummary() {
+      try {
+        const activeResponse = await fetch("/api/shifts/active/");
+        if (activeResponse.status === 404) {
+          setText("activeShiftTop", "—");
+          setText("shiftNameCard", "—");
+          setText("shiftDateCard", "—");
+          setText("shiftEmployeeCount", "0");
+          setText("shiftBusyCount", "0");
+          return;
+        }
+
+        if (!activeResponse.ok) throw new Error(`HTTP ${activeResponse.status}`);
+
+        const shift = await activeResponse.json();
+        setText("activeShiftTop", shift.name || `#${shift.id}`);
+        setText("shiftNameCard", shift.name || `#${shift.id}`);
+        setText("shiftDateCard", shift.date || "—");
+
+        const statsResponse = await fetch(`/api/shifts/${shift.id}/stats/`);
+        if (!statsResponse.ok) throw new Error(`HTTP ${statsResponse.status}`);
+
+        const stats = await statsResponse.json();
+        const items = Array.isArray(stats) ? stats : [];
+        const busyCount = items.filter(item => item.is_busy).length;
+
+        setText("shiftEmployeeCount", String(items.length));
+        setText("shiftBusyCount", String(busyCount));
+      } catch (error) {
+        console.error("Ошибка загрузки summary смены:", error);
+        setText("activeShiftTop", "—");
+        setText("shiftNameCard", "—");
+        setText("shiftDateCard", "—");
+        setText("shiftEmployeeCount", "—");
+        setText("shiftBusyCount", "—");
+      }
+    }
+
+    async function loadAuditSummary() {
+      try {
+        const response = await fetch("/monitoring/api/audit-status/");
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+        const data = await response.json();
+
+        setText("auditBlocksCount", String(data.blocks_count ?? 0));
+        setText("auditEventsCount", String(data.events_count ?? 0));
+
+        const latestStatus = data.latest_status || "unknown";
+        setText(
+          "auditTop",
+          latestStatus === "unknown" ? "—" : latestStatus.toUpperCase()
+        );
+        setAuditChip(latestStatus);
+        setText("auditLatestLine", data.latest_line || "Нет данных о последних проверках.");
+      } catch (error) {
+        console.error("Ошибка загрузки summary аудита:", error);
+        setText("auditBlocksCount", "—");
+        setText("auditEventsCount", "—");
+        setText("auditTop", "—");
+        setAuditChip("unknown");
+        setText("auditLatestLine", "Не удалось загрузить данные аудита.");
+      }
+    }
+
+    async function loadBackgroundSummary() {
+      try {
+        const response = await fetch("/monitoring/api/background-status/");
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+        const data = await response.json();
+
+        setText("bgActiveShiftsCount", String(data.active_shifts_count ?? 0));
+        setText("bgPendingCount", String(data.pool_pending_count ?? 0));
+
+        const latestStatus = data.latest_status || "unknown";
+        setText(
+          "backgroundTop",
+          latestStatus === "unknown" ? "—" : latestStatus.toUpperCase()
+        );
+        setBackgroundChip(latestStatus);
+        setText("bgLatestLine", data.latest_line || "Нет данных о последних тиках.");
+      } catch (error) {
+        console.error("Ошибка загрузки summary фонового контура:", error);
+        setText("bgActiveShiftsCount", "—");
+        setText("bgPendingCount", "—");
+        setText("backgroundTop", "—");
+        setBackgroundChip("unknown");
+        setText("bgLatestLine", "Не удалось загрузить данные фонового контура.");
+      }
+    }
+
+    async function loadDashboard() {
+      await Promise.all([
+        loadLiveTasksSummary(),
+        loadShiftSummary(),
+        loadAuditSummary(),
+        loadBackgroundSummary(),
+      ]);
+    }
+
+    loadDashboard();
+    setInterval(loadDashboard, 5000);
+  </script>
+</body>
+</html>
