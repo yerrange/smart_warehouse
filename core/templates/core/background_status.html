@@ -165,9 +165,41 @@
       border: 1px solid var(--border);
       border-radius: 12px;
     }
+
+    .back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 16px;
+      padding: 8px 12px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: #fff;
+      color: #1f2937;
+      text-decoration: none;
+      font-size: 14px;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+      transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
+    }
+
+    .back-link:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+      background: #f9fafb;
+    }
+
+    .back-link-arrow {
+      font-size: 16px;
+      line-height: 1;
+    }
   </style>
 </head>
 <body>
+  <a href="{% url 'monitoring_dashboard' %}" class="back-link">
+    <span class="back-link-arrow">←</span>
+    <span>Назад к панели мониторинга</span>
+  </a>
+
   <div class="page-header">
     <div>
       <h1 class="page-title">Состояние фонового контура</h1>
