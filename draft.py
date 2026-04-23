@@ -106,3 +106,5 @@ celery -A smart_warehouse beat   -l WARNING
 
 python manage.py simulate_history --purge --reset-stats --employees 12 --tasks 300 --dataset-out ml_data/sim_dataset.csv
 python manage.py train_task_assigner --dataset ml_data/sim_dataset.csv
+
+def

@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Состояние аудита</title>
+  <style>
+    :root {
+      --border: #d9dde3;
+      --muted: #6b7280;
+      --bg-head: #f4f6f8;
+      --bg-page: #fafbfc;
+      --bg-card: #ffffff;
+      --bg-ok: #eef8f0;
+      --bg-fail: #fff1f1;
+      --bg-unknown: #f4f6f8;
+      --text-ok: #166534;
+      --text-fail: #991b1b;
+      --text-unknown: #374151;
+    }
+
+    body {
+      margin: 24px;
+      background: var(--bg-page);
+      color: #1f2937;
+      font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .page-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: end;
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+
+    .page-title {
+      margin: 0;
+      font-size: 28px;
+      line-height: 1.2;
+    }
+
+    .page-subtitle {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .summary {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 20px;
+    }
+
+    .summary-card {
+      min-width: 180px;
+      padding: 12px 14px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+    }
+
+    .summary-label {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 4px;
+    }
+
+    .summary-value {
+      font-size: 20px;
+      font-weight: 600;
+    }
+
+    .status-panel {
+      margin-bottom: 20px;
+      padding: 14px 16px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--bg-card);
+    }
+
+    .status-panel.ok {
+      background: var(--bg-ok);
+      color: var(--text-ok);
+    }
+
+    .status-panel.fail {
+      background: var(--bg-fail);
+      color: var(--text-fail);
+    }
+
+    .status-panel.unknown {
+      background: var(--bg-unknown);
+      color: var(--text-unknown);
+    }
+
+    .status-title {
+      font-size: 18px;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+
+    .status-line {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 13px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    th, td {
+      border-bottom: 1px solid var(--border);
+      padding: 10px 12px;
+      text-align: left;
+      vertical-align: top;
+      font-size: 14px;
+    }
+
+    th {
+      background: var(--bg-head);
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    tr:last-child td {
+      border-bottom: none;
+    }
+
+    .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+
+    .empty-state {
+      padding: 20px;
+      color: var(--muted);
+      font-size: 14px;
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+    }
+
+    .back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 16px;
+      padding: 8px 12px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: #fff;
+      color: #1f2937;
+      text-decoration: none;
+      font-size: 14px;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+      transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
+    }
+
+    .back-link:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+      background: #f9fafb;
+    }
+
+    .back-link-arrow {
+      font-size: 16px;
+      line-height: 1;
+    }
+  </style>
+</head>
+<body>
+  <a href="{% url 'monitoring_dashboard' %}" class="back-link">
+    <span class="back-link-arrow">←</span>
+    <span>Назад к панели мониторинга</span>
+  </a>
+
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Состояние аудита</h1>
+      <p class="page-subtitle">
+        Периодическая проверка целостности цепочки и краткая сводка по audit-контру
+      </p>
+    </div>
+  </div>
+
+  <div class="summary">
+    <div class="summary-card">
+      <span class="summary-label">Запечатанных блоков</span>
+      <span class="summary-value" id="blocksCount">0</span>
+    </div>
+    <div class="summary-card">
+      <span class="summary-label">Событий аудита</span>
+      <span class="summary-value" id="eventsCount">0</span>
+    </div>
+    <div class="summary-card">
+      <span class="summary-label">Последний статус</span>
+      <span class="summary-value" id="latestStatusText">—</span>
+    </div>
+  </div>
+
+  <div id="statusPanel" class="status-panel unknown">
+    <div id="statusTitle" class="status-title">Статус проверки неизвестен</div>
+    <div id="latestLine" class="status-line">Файл результатов проверки пока пуст или недоступен.</div>
+  </div>
+
+  <div id="emptyState" class="empty-state" hidden>
+    История проверок пока отсутствует.
+  </div>
+
+  <div class="table-wrap" id="tableWrap" hidden>
+    <table>
+      <thead>
+        <tr>
+          <th>Последние результаты проверок</th>
+        </tr>
+      </thead>
+      <tbody id="checksBody"></tbody>
+    </table>
+  </div>
+
+  <script>
+    const blocksCountEl = document.getElementById("blocksCount");
+    const eventsCountEl = document.getElementById("eventsCount");
+    const latestStatusTextEl = document.getElementById("latestStatusText");
+
+    const statusPanelEl = document.getElementById("statusPanel");
+    const statusTitleEl = document.getElementById("statusTitle");
+    const latestLineEl = document.getElementById("latestLine");
+
+    const tableWrapEl = document.getElementById("tableWrap");
+    const emptyStateEl = document.getElementById("emptyState");
+    const checksBodyEl = document.getElementById("checksBody");
+
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    function applyStatus(status) {
+      statusPanelEl.classList.remove("ok", "fail", "unknown");
+      statusPanelEl.classList.add(status);
+
+      if (status === "ok") {
+        statusTitleEl.textContent = "Цепочка аудита корректна";
+        latestStatusTextEl.textContent = "OK";
+      } else if (status === "fail") {
+        statusTitleEl.textContent = "Обнаружено нарушение целостности";
+        latestStatusTextEl.textContent = "FAIL";
+      } else {
+        statusTitleEl.textContent = "Статус проверки неизвестен";
+        latestStatusTextEl.textContent = "—";
+      }
+    }
+
+    function renderChecks(lines) {
+      checksBodyEl.innerHTML = "";
+
+      if (!lines.length) {
+        tableWrapEl.hidden = true;
+        emptyStateEl.hidden = false;
+        return;
+      }
+
+      lines.slice().reverse().forEach((line) => {
+        const row = document.createElement("tr");
+        row.innerHTML = `<td class="mono">${escapeHtml(line)}</td>`;
+        checksBodyEl.appendChild(row);
+      });
+
+      tableWrapEl.hidden = false;
+      emptyStateEl.hidden = true;
+    }
+
+    async function loadAuditStatus() {
+      try {
+        const response = await fetch("/monitoring/api/audit-status/");
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+
+        blocksCountEl.textContent = String(data.blocks_count ?? 0);
+        eventsCountEl.textContent = String(data.events_count ?? 0);
+
+        const latestStatus = data.latest_status || "unknown";
+        applyStatus(latestStatus);
+
+        latestLineEl.textContent = data.latest_line || "Файл результатов проверки пока пуст или недоступен.";
+        renderChecks(Array.isArray(data.recent_checks) ? data.recent_checks : []);
+      } catch (error) {
+        console.error("Ошибка загрузки состояния аудита:", error);
+        applyStatus("unknown");
+        latestLineEl.textContent = "Не удалось загрузить данные о состоянии аудита.";
+        tableWrapEl.hidden = true;
+        emptyStateEl.hidden = false;
+      }
+    }
+
+    loadAuditStatus();
+    setInterval(loadAuditStatus, 5000);
+  </script>
+</body>
+</html>

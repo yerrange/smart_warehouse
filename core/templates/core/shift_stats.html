@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Статистика смены</title>
+  <style>
+    :root {
+      --border: #d9dde3;
+      --muted: #6b7280;
+      --bg-head: #f4f6f8;
+      --bg-page: #fafbfc;
+      --bg-card: #ffffff;
+      --bg-busy: #fff7e6;
+      --bg-idle: #eef6ff;
+    }
+
+    body {
+      margin: 24px;
+      background: var(--bg-page);
+      color: #1f2937;
+      font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .page-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: end;
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+
+    .page-title {
+      margin: 0;
+      font-size: 28px;
+      line-height: 1.2;
+    }
+
+    .page-subtitle {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .summary {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 20px;
+    }
+
+    .summary-card {
+      min-width: 180px;
+      padding: 12px 14px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+    }
+
+    .summary-label {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 4px;
+    }
+
+    .summary-value {
+      font-size: 20px;
+      font-weight: 600;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    th, td {
+      border-bottom: 1px solid var(--border);
+      padding: 10px 12px;
+      text-align: left;
+      vertical-align: top;
+      font-size: 14px;
+    }
+
+    th {
+      background: var(--bg-head);
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    tr:last-child td {
+      border-bottom: none;
+    }
+
+    tr.is-busy {
+      background: var(--bg-busy);
+    }
+
+    tr.is-idle {
+      background: var(--bg-idle);
+    }
+
+    .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+
+    .status-badge {
+      display: inline-block;
+      padding: 3px 8px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: #fff;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .empty-state {
+      padding: 20px;
+      color: var(--muted);
+      font-size: 14px;
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+    }
+
+    .back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 16px;
+      padding: 8px 12px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: #fff;
+      color: #1f2937;
+      text-decoration: none;
+      font-size: 14px;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+      transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
+    }
+
+    .back-link:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+      background: #f9fafb;
+    }
+
+    .back-link-arrow {
+      font-size: 16px;
+      line-height: 1;
+    }
+  </style>
+</head>
+<body>
+  <a href="{% url 'monitoring_dashboard' %}" class="back-link">
+    <span class="back-link-arrow">←</span>
+    <span>Назад к панели мониторинга</span>
+  </a>
+
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Статистика активной смены</h1>
+      <p class="page-subtitle">
+        Текущая загрузка сотрудников и накопленная статистика внутри смены
+      </p>
+    </div>
+  </div>
+
+  <div class="summary">
+    <div class="summary-card">
+      <span class="summary-label">Активная смена</span>
+      <span class="summary-value" id="shiftName">—</span>
+    </div>
+    <div class="summary-card">
+      <span class="summary-label">Дата смены</span>
+      <span class="summary-value" id="shiftDate">—</span>
+    </div>
+    <div class="summary-card">
+      <span class="summary-label">Сотрудников в таблице</span>
+      <span class="summary-value" id="employeeCount">0</span>
+    </div>
+  </div>
+
+  <div id="emptyState" class="empty-state" hidden>
+    Нет активной смены или статистика ещё не сформирована.
+  </div>
+
+  <div class="table-wrap" id="tableWrap" hidden>
+    <table id="statsTable">
+      <thead>
+        <tr>
+          <th>Сотрудник</th>
+          <th>Занятость</th>
+          <th>Назначено задач</th>
+          <th>Завершено задач</th>
+          <th>Счёт смены</th>
+          <th>Последняя активность</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <script>
+    const shiftNameEl = document.getElementById("shiftName");
+    const shiftDateEl = document.getElementById("shiftDate");
+    const employeeCountEl = document.getElementById("employeeCount");
+    const emptyStateEl = document.getElementById("emptyState");
+    const tableWrapEl = document.getElementById("tableWrap");
+    const tbody = document.querySelector("#statsTable tbody");
+
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    function formatEmployee(employee) {
+      if (!employee) return "—";
+      const code = employee.employee_code || "";
+      const firstName = employee.first_name || "";
+      const lastName = employee.last_name || "";
+      const fullName = `${firstName} ${lastName}`.trim();
+
+      if (code && fullName) return `${code} — ${fullName}`;
+      if (code) return code;
+      if (fullName) return fullName;
+      return "—";
+    }
+
+    function formatDateTime(value) {
+      if (!value) return "—";
+      return value;
+    }
+
+    function renderRows(items) {
+      tbody.innerHTML = "";
+
+      items.forEach((item) => {
+        const row = document.createElement("tr");
+        row.classList.add(item.is_busy ? "is-busy" : "is-idle");
+
+        row.innerHTML = `
+          <td>${escapeHtml(formatEmployee(item.employee))}</td>
+          <td><span class="status-badge">${escapeHtml(item.is_busy ? "Занят" : "Свободен")}</span></td>
+          <td>${escapeHtml(item.task_assigned_count ?? 0)}</td>
+          <td>${escapeHtml(item.task_completed_count ?? 0)}</td>
+          <td>${escapeHtml(item.shift_score ?? 0)}</td>
+          <td class="mono">${escapeHtml(formatDateTime(item.last_task_at))}</td>
+        `;
+
+        tbody.appendChild(row);
+      });
+
+      employeeCountEl.textContent = String(items.length);
+      emptyStateEl.hidden = items.length > 0;
+      tableWrapEl.hidden = items.length === 0;
+    }
+
+    async function loadShiftStats() {
+      try {
+        const activeResponse = await fetch("/api/shifts/active/");
+        if (activeResponse.status === 404) {
+          emptyStateEl.hidden = false;
+          tableWrapEl.hidden = true;
+          return;
+        }
+
+        if (!activeResponse.ok) {
+          throw new Error(`HTTP ${activeResponse.status} при загрузке активной смены`);
+        }
+
+        const shift = await activeResponse.json();
+        shiftNameEl.textContent = shift.name || `#${shift.id}`;
+        shiftDateEl.textContent = shift.date || "—";
+
+        const statsResponse = await fetch(`/api/shifts/${shift.id}/stats/`);
+        if (!statsResponse.ok) {
+          throw new Error(`HTTP ${statsResponse.status} при загрузке статистики смены`);
+        }
+
+        const stats = await statsResponse.json();
+        renderRows(Array.isArray(stats) ? stats : []);
+      } catch (error) {
+        console.error("Ошибка загрузки статистики смены:", error);
+        emptyStateEl.hidden = false;
+        tableWrapEl.hidden = true;
+      }
+    }
+
+    loadShiftStats();
+    setInterval(loadShiftStats, 5000);
+  </script>
+</body>
+</html>
