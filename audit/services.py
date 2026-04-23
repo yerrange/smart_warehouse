@@ -207,11 +207,17 @@ def verify_chain() -> dict:
                 meta=event.meta,
                 created_at_iso=event.created_at.isoformat(),
             )
-            if recomputed != event.event_hash \
-                    or item.leaf_hash != event.event_hash:
+            if recomputed != event.event_hash or item.leaf_hash != event.event_hash:
                 return {
                     "ok": False,
-                    "where": f"event hash mismatch event#{event.id} in block {block.index}"
+                    "where": (
+                        f"event hash mismatch "
+                        f"event_id={event.id} "
+                        f"block_index={block.index} "
+                        f"leaf_index={item.leaf_index} "
+                        f"entity={event.entity_type}:{event.entity_id} "
+                        f"action={event.action}"
+                    )
                 }
         prev = block
     return {"ok": True, "blocks": len(blocks)}

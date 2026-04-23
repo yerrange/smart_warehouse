@@ -1,0 +1,30 @@
+[2026-04-23T08:59:12.265354+00:00] OK | blocks=17
+[2026-04-23T09:00:12.264365+00:00] OK | blocks=17
+[2026-04-23T09:01:12.264804+00:00] OK | blocks=17
+[2026-04-23T09:02:12.271807+00:00] OK | blocks=17
+[2026-04-23T09:03:12.271417+00:00] OK | blocks=17
+[2026-04-23T09:04:12.277111+00:00] FAIL | where=event hash mismatch event#5 in block 3
+[2026-04-23T09:05:12.276821+00:00] FAIL | where=event hash mismatch event#5 in block 3
+[2026-04-23T09:06:12.277620+00:00] FAIL | where=event hash mismatch event#5 in block 3
+[2026-04-23T09:07:12.283648+00:00] FAIL | where=event hash mismatch event#5 in block 3
+[2026-04-23T09:08:12.289222+00:00] FAIL | where=event hash mismatch event#5 in block 3
+[2026-04-23T09:09:12.289137+00:00] FAIL | where=event hash mismatch event#5 in block 3
+[2026-04-23T09:10:12.290761+00:00] FAIL | where=event hash mismatch event#5 in block 3
+[2026-04-23T09:11:12.290041+00:00] FAIL | where=event hash mismatch event#5 in block 3
+[2026-04-23T09:12:12.290679+00:00] FAIL | where=event hash mismatch event#5 in block 3
+[2026-04-23T09:13:12.295523+00:00] FAIL | where=event hash mismatch event#5 in block 3
+[2026-04-23T09:14:12.296291+00:00] FAIL | where=event hash mismatch event#5 in block 3
+[2026-04-23T09:15:12.296147+00:00] FAIL | where=event hash mismatch event_id=5 block_index=3 leaf_index=0 entity=Task:302 action=ASSIGN
+[2026-04-23T09:16:12.297412+00:00] FAIL | where=event hash mismatch event_id=5 block_index=3 leaf_index=0 entity=Task:302 action=ASSIGN
+[2026-04-23T09:17:12.303162+00:00] FAIL | where=event hash mismatch event_id=5 block_index=3 leaf_index=0 entity=Task:302 action=ASSIGN
+[2026-04-23T09:18:12.303931+00:00] FAIL | where=event hash mismatch event_id=5 block_index=3 leaf_index=0 entity=Task:302 action=ASSIGN
+[2026-04-23T09:19:12.304654+00:00] FAIL | where=event hash mismatch event_id=5 block_index=3 leaf_index=0 entity=Task:302 action=ASSIGN
+[2026-04-23T09:20:12.306661+00:00] FAIL | where=event hash mismatch event_id=5 block_index=3 leaf_index=0 entity=Task:302 action=ASSIGN
+[2026-04-23T09:21:12.309337+00:00] FAIL | where=event hash mismatch event_id=5 block_index=3 leaf_index=0 entity=Task:302 action=ASSIGN
+[2026-04-23T09:22:12.310734+00:00] FAIL | where=event hash mismatch event_id=5 block_index=3 leaf_index=0 entity=Task:302 action=ASSIGN
+[2026-04-23T09:23:12.311172+00:00] FAIL | where=event hash mismatch event_id=5 block_index=3 leaf_index=0 entity=Task:302 action=ASSIGN
+[2026-04-23T09:24:12.311023+00:00] FAIL | where=event hash mismatch event_id=5 block_index=3 leaf_index=0 entity=Task:302 action=ASSIGN
+[2026-04-23T09:25:12.312627+00:00] FAIL | where=event hash mismatch event_id=5 block_index=3 leaf_index=0 entity=Task:302 action=ASSIGN
+[2026-04-23T09:26:12.312453+00:00] FAIL | where=event hash mismatch event_id=5 block_index=3 leaf_index=0 entity=Task:302 action=ASSIGN
+[2026-04-23T09:27:12.315309+00:00] FAIL | where=event hash mismatch event_id=5 block_index=3 leaf_index=0 entity=Task:302 action=ASSIGN
+[2026-04-23T09:28:12.321369+00:00] FAIL | where=event hash mismatch event_id=5 block_index=3 leaf_index=0 entity=Task:302 action=ASSIGN

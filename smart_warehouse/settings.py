@@ -181,6 +181,10 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": 30.0,
         "args": [512],
     },
+    "audit-verify-chain": {
+        "task": "audit.celery_tasks.verify_chain_tick",
+        "schedule": 60.0,  # раз в минуту
+    },
     # пример по крону:
     # "nightly-audit": {
     #     "task": "audit.tasks.build_today_merkle_root",
