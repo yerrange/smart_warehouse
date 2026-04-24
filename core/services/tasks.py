@@ -116,11 +116,20 @@ def assign_task_to_best_employee(task: Task, shift: Shift | None):
     if pick.mode == "ml":
         top = pick.topk or []
         top_str = "; ".join(
-            f"{c.get('employee_code') or c['employee_id']}={c.get('predicted_minutes'):.2f}m"
+            (
+                f"{c.get('employee_code') or c['employee_id']}"
+                f"=pred:{c.get('predicted_minutes'):.2f}m"
+                f"/adj:{c.get('adjusted_score'):.2f}"
+            )
             for c in top
-            if c.get("predicted_minutes") is not None
+            if c.get("predicted_minutes") is not None and c.get("adjusted_score") is not None
         )
-        note = f"Автоназначение (ML) – best={pick.predicted_minutes:.2f}m – top{len(top)}: {top_str}"
+        note = (
+            f"Автоназначение (ML) – "
+            f"best_pred={pick.predicted_minutes:.2f}m – "
+            f"best_adj={pick.adjusted_score:.2f} – "
+            f"top{len(top)}: {top_str}"
+        )
     elif pick.mode == "heuristic_fallback":
         note = f"Автоназначение (fallback→эвристика) – причина: {pick.error}"
     else:
@@ -176,6 +185,8 @@ def assign_task_to_best_employee(task: Task, shift: Shift | None):
 
     if pick.predicted_minutes is not None:
         after["ml_predicted_minutes"] = round(float(pick.predicted_minutes), 3)
+    if pick.adjusted_score is not None:
+        after["ml_adjusted_score"] = round(float(pick.adjusted_score), 3)
     if pick.error:
         after["ml_error"] = pick.error
 
@@ -313,9 +324,9 @@ def assign_task_manually(task: Task, employee_code: str) -> None:
             task.cargo.updated_at = timestamp
             task.cargo.save(update_fields=["handling_state", "updated_at"])
 
-        new_stats.task_assigned_count = (new_stats.task_assigned_count or 0) + 1
-        new_stats.last_task_at = timestamp
-        new_stats.save(update_fields=["task_assigned_count", "last_task_at"])
+    new_stats.task_assigned_count = (new_stats.task_assigned_count or 0) + 1
+    new_stats.last_task_at = timestamp
+    new_stats.save(update_fields=["task_assigned_count", "last_task_at"])
 
     TaskAssignmentLog.objects.create(
         task=task,
