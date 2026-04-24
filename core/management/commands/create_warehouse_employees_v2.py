@@ -1,6 +1,3 @@
-# python manage.py create_warehouse_employees 30
-
-
 from __future__ import annotations
 
 import math
@@ -32,22 +29,16 @@ FIRST_NAMES = [
 ]
 
 LAST_NAMES = [
-    "Иванов", "Петров", "Сидоров", "Смирнов", "Кузнецов",
-    "Попов", "Васильев", "Соколов", "Михайлов", "Новиков",
-    "Фёдоров", "Морозов", "Волков", "Алексеев", "Лебедев",
-    "Семёнов", "Егоров", "Павлов", "Козлов", "Степанов",
-    "Николаев", "Орлов", "Андреев", "Макаров", "Никитин",
-    "Захаров", "Зайцев", "Соловьёв", "Борисов", "Яковлев",
-    "Григорьев", "Романов", "Воробьёв", "Сергеев", "Крылов",
-    "Максимов", "Лазарев", "Голубев", "Беляев", "Тарасов",
-    "Белов", "Комаров", "Киселёв", "Ильин", "Гусев",
-    "Титов", "Калинин", "Королёв", "Чернов", "Жуков",
+    "Иванов", "Петров", "Сидоров", "Орлов", "Кузнецов",
+    "Зайцев", "Новиков", "Морозов", "Воробьёв", "Смирнов",
+    "Фёдоров", "Лебедев", "Соколов", "Васильев", "Попов",
+    "Андреев", "Макаров", "Николаев", "Белов", "Крылов",
 ]
 
 CODE_RE = re.compile(r"^(?P<prefix>[A-Za-z]+)(?P<num>\d+)$")
 DEFAULT_PREFIX = "E"
 DEFAULT_FORKLIFT_RATIO = 0.20
-DEFAULT_CODE_WIDTH = 4
+DEFAULT_CODE_WIDTH = 3
 
 
 @dataclass(frozen=True)
@@ -260,13 +251,8 @@ class Command(BaseCommand):
         return n
 
     def _identity_for_number(self, number: int) -> EmployeeIdentity:
-        idx = number - 1
-        first_name = FIRST_NAMES[idx % len(FIRST_NAMES)]
-        # Фамилии распределяем псевдослучайно, но детерминированно по номеру сотрудника,
-        # чтобы даже в первых 20–30 сотрудниках не было эффекта "все Ивановы и Петровы".
-        # Множитель 7 взаимно прост с длиной списка фамилий (50), поэтому ранние номера
-        # дают хорошо перемешанную последовательность без короткого повтора.
-        last_name = LAST_NAMES[(idx * 7) % len(LAST_NAMES)]
+        first_name = FIRST_NAMES[(number - 1) % len(FIRST_NAMES)]
+        last_name = LAST_NAMES[((number - 1) // len(FIRST_NAMES)) % len(LAST_NAMES)]
         return EmployeeIdentity(first_name=first_name, last_name=last_name)
 
     def _calculate_forklift_count(self, active_count: int, ratio: float) -> int:

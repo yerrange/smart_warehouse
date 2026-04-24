@@ -219,7 +219,7 @@ CELERY_WORKER_HIJACK_ROOT_LOGGER = False
 
 
 # === ML task assignment (CatBoost) ===
-TASK_ASSIGNER_MODE = os.getenv("TASK_ASSIGNER_MODE", "ml").lower()  # ml | heuristic
+TASK_ASSIGNER_MODE = os.getenv("TASK_ASSIGNER_MODE", "heuristic").lower()  # ml | heuristic
 TASK_ASSIGNER_MODEL_PATH = os.getenv(
     "TASK_ASSIGNER_MODEL_PATH",
     str(BASE_DIR / "ml_artifacts" / "models" / "task_assigner_v1.cbm"),
