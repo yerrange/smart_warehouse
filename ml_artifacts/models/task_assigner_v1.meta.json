@@ -35,114 +35,114 @@
     "loss_function": "MAE",
     "eval_metric": "MAE",
     "iterations_requested": 800,
-    "iterations_used": 180,
+    "iterations_used": 56,
     "depth": 8,
     "learning_rate": 0.06,
     "test_size": 0.2
   },
   "training": {
-    "rows_in_csv": 357,
-    "valid_training_rows": 357,
+    "rows_in_csv": 2776,
+    "valid_training_rows": 2776,
     "rows_dropped_by_target": 0,
-    "task_groups": 357,
-    "train_rows": 285,
-    "validation_rows": 72,
-    "train_task_groups": 285,
-    "validation_task_groups": 72
+    "task_groups": 2776,
+    "train_rows": 2220,
+    "validation_rows": 556,
+    "train_task_groups": 2220,
+    "validation_task_groups": 556
   },
   "target_stats": {
-    "min": 4.0,
-    "max": 29.0,
-    "mean": 15.523809523809524,
-    "median": 15.0,
-    "std": 5.648689796041034
+    "min": 8.0,
+    "max": 60.0,
+    "mean": 21.484870317002883,
+    "median": 22.0,
+    "std": 5.516198459471651
   },
   "metrics": {
-    "mae": 1.4441065257015784,
-    "rmse": 1.8860680337200557,
-    "baseline_mae": 4.88864522417154,
-    "baseline_rmse": 5.696041267301861
+    "mae": 2.3238010781498004,
+    "rmse": 3.082735756852343,
+    "baseline_mae": 4.126604122107719,
+    "baseline_rmse": 5.21894113813905
   },
   "feature_importance": [
     {
       "feature": "estimated_minutes",
-      "importance": 55.72469596010243
-    },
-    {
-      "feature": "task_type",
-      "importance": 6.874192611078312
-    },
-    {
-      "feature": "emp_profile_performance_factor",
-      "importance": 3.9771714361694785
-    },
-    {
-      "feature": "minutes_into_shift",
-      "importance": 3.8176493990866605
-    },
-    {
-      "feature": "difficulty",
-      "importance": 3.6468086022607196
-    },
-    {
-      "feature": "emp_profile_sigma",
-      "importance": 3.6106222621448194
-    },
-    {
-      "feature": "task_age_minutes",
-      "importance": 3.3977909474410106
-    },
-    {
-      "feature": "emp_shift_score",
-      "importance": 2.764884942958628
-    },
-    {
-      "feature": "emp_profile_sample_count",
-      "importance": 2.2089458029271296
+      "importance": 22.285799819018116
     },
     {
       "feature": "emp_profile_mean_minutes",
-      "importance": 2.0999718043611466
+      "importance": 16.441510405791433
     },
     {
-      "feature": "emp_task_completed_count",
-      "importance": 1.8614828450400451
+      "feature": "emp_profile_performance_factor",
+      "importance": 12.406074514160144
     },
     {
-      "feature": "priority",
-      "importance": 1.71513019088104
-    },
-    {
-      "feature": "emp_task_assigned_count",
-      "importance": 1.7109168742989747
-    },
-    {
-      "feature": "emp_profile_has_mean",
-      "importance": 1.4823396402927467
-    },
-    {
-      "feature": "emp_modifier_sample_count_sum",
-      "importance": 1.282734312864565
+      "feature": "difficulty",
+      "importance": 10.00227639309817
     },
     {
       "feature": "task_required_qual_count",
-      "importance": 1.2545678897344859
+      "importance": 5.214882464973916
     },
     {
-      "feature": "emp_modifier_factor_product",
-      "importance": 1.0021138840702348
+      "feature": "task_type",
+      "importance": 4.827127583899023
     },
     {
-      "feature": "emp_modifier_sigma_bonus_sum",
-      "importance": 0.6086091251980248
+      "feature": "emp_task_completed_count",
+      "importance": 4.399138560987124
     },
     {
-      "feature": "emp_profile_source_kind",
-      "importance": 0.4982646755973853
+      "feature": "minutes_into_shift",
+      "importance": 3.1158595889505385
+    },
+    {
+      "feature": "task_age_minutes",
+      "importance": 2.8337321669564997
+    },
+    {
+      "feature": "emp_shift_score",
+      "importance": 2.8306798350464515
+    },
+    {
+      "feature": "emp_task_assigned_count",
+      "importance": 2.7478489523796203
+    },
+    {
+      "feature": "priority",
+      "importance": 2.568430774613311
+    },
+    {
+      "feature": "emp_profile_sigma",
+      "importance": 2.330755177381714
+    },
+    {
+      "feature": "emp_profile_sample_count",
+      "importance": 2.256832383426282
     },
     {
       "feature": "emp_required_modifier_count",
-      "importance": 0.4611067934921388
+      "importance": 1.8348326729955486
+    },
+    {
+      "feature": "emp_modifier_sample_count_sum",
+      "importance": 1.502900207496041
+    },
+    {
+      "feature": "emp_modifier_factor_product",
+      "importance": 1.396374681997035
+    },
+    {
+      "feature": "emp_modifier_sigma_bonus_sum",
+      "importance": 0.5645066524279763
+    },
+    {
+      "feature": "emp_profile_source_kind",
+      "importance": 0.325032425108587
+    },
+    {
+      "feature": "emp_profile_has_mean",
+      "importance": 0.11540473929247608
     }
   ]
 }

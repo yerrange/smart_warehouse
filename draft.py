@@ -129,7 +129,20 @@ python manage.py simulate_warehouse_history_final \
   --verify-chain
 
 
-python manage.py train_task_assigner ^
-  --dataset ml_data/execution_dataset.csv ^
-  --model-out ml_artifacts/models/task_assigner_v1.cbm ^
+python manage.py train_task_assigner \
+  --dataset ml_data/execution_dataset.csv \
+  --model-out ml_artifacts/models/task_assigner_v1.cbm \
   --meta-out ml_artifacts/models/task_assigner_v1.meta.json
+
+
+python manage.py simulate_shift \
+  --employees-on-shift 15 \
+  --cargos 40 \
+  --general-tasks 15 \
+  --dispatch-rate 0.85 \
+  --internal-move-rate 0.4 \
+  --forklift-mix-rate 0.2 \
+  --seed 42 \
+  --shift-date 2026-06-05 \
+  --final-seal \
+  --shifts-count 5

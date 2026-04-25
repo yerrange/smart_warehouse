@@ -220,10 +220,10 @@ class Command(BaseCommand):
             qs = qs.filter(external_ref__startswith="SIMSHIFT")
 
         if date_from:
-            qs = qs.filter(created_at__date__gte=date_from)
+            qs = qs.filter(shift__date__gte=date_from)
 
         if date_to:
-            qs = qs.filter(created_at__date__lte=date_to)
+            qs = qs.filter(shift__date__lte=date_to)
 
         return list(qs)
 
