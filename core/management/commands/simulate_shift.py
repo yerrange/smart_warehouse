@@ -28,7 +28,10 @@ from core.models import (
     Cargo,
     CargoEvent,
     Employee,
+    EmployeeQualification,
     EmployeeShiftStats,
+    EmployeeTaskProfile,
+    EmployeeTaskQualificationModifier,
     LocationSlot,
     Qualification,
     SKU,
@@ -97,31 +100,31 @@ class TaskProfile:
 TASK_PROFILES: dict[str, TaskProfile] = {
     Task.TaskType.RECEIVE_TO_INBOUND: TaskProfile(
         task_type=Task.TaskType.RECEIVE_TO_INBOUND,
-        base_minutes=6,
+        base_minutes=12,
         default_priority=4,
         required_qual_codes=("RECEIVE",),
     ),
     Task.TaskType.PUTAWAY_TO_RACK: TaskProfile(
         task_type=Task.TaskType.PUTAWAY_TO_RACK,
-        base_minutes=8,
+        base_minutes=18,
         default_priority=5,
         required_qual_codes=("MOVE",),
     ),
     Task.TaskType.MOVE_BETWEEN_SLOTS: TaskProfile(
         task_type=Task.TaskType.MOVE_BETWEEN_SLOTS,
-        base_minutes=7,
+        base_minutes=14,
         default_priority=3,
         required_qual_codes=("MOVE",),
     ),
     Task.TaskType.DISPATCH_CARGO: TaskProfile(
         task_type=Task.TaskType.DISPATCH_CARGO,
-        base_minutes=6,
+        base_minutes=16,
         default_priority=4,
         required_qual_codes=("DISPATCH",),
     ),
     Task.TaskType.GENERAL: TaskProfile(
         task_type=Task.TaskType.GENERAL,
-        base_minutes=4,
+        base_minutes=10,
         default_priority=1,
         required_qual_codes=(),
     ),
@@ -185,6 +188,12 @@ class Command(BaseCommand):
             default=None,
             help="Shift date in YYYY-MM-DD (default: today in project timezone)",
         )
+        parser.add_argument(
+            "--shifts-count",
+            type=int,
+            default=1,
+            help="How many consecutive shifts to simulate starting from --shift-date",
+        )
         parser.add_argument("--shift-name", default="SIM shift", help="Shift name")
         parser.add_argument(
             "--seal-every",
@@ -231,7 +240,83 @@ class Command(BaseCommand):
         )
 
 
+
     def handle(self, *args, **opts):
+        shifts_count = int(opts.get("shifts_count") or 1)
+        if shifts_count <= 0:
+            raise CommandError("--shifts-count must be a positive integer")
+
+        if opts.get("shift_date"):
+            try:
+                base_shift_date = date_cls.fromisoformat(opts["shift_date"])
+            except ValueError as exc:
+                raise CommandError("Некорректная дата. Используй YYYY-MM-DD.") from exc
+        else:
+            base_shift_date = timezone.localdate()
+
+        base_seed = int(opts["seed"])
+
+        if shifts_count == 1:
+            single_opts = dict(opts)
+            single_opts["shift_date"] = base_shift_date.isoformat()
+            single_opts["seed"] = base_seed
+            return self._simulate_one_shift(*args, **single_opts)
+
+        self.stdout.write(
+            self.style.NOTICE(
+                f"Запуск серии смен: count={shifts_count}, first_date={base_shift_date.isoformat()}, base_seed={base_seed}"
+            )
+        )
+
+        for offset in range(shifts_count):
+            current_opts = dict(opts)
+            current_date = base_shift_date + timedelta(days=offset)
+            current_seed = base_seed + offset
+
+            current_opts["shift_date"] = current_date.isoformat()
+            current_opts["seed"] = current_seed
+            current_opts["final_seal"] = False
+            current_opts["verify_chain"] = False
+            current_opts["export_execution_dataset"] = None
+
+            self.stdout.write(
+                self.style.NOTICE(
+                    f"=== Симуляция смены {offset + 1}/{shifts_count}: date={current_date.isoformat()}, seed={current_seed} ==="
+                )
+            )
+            self._simulate_one_shift(*args, **current_opts)
+
+        if opts["final_seal"]:
+            sealed = 0
+            while True:
+                block = self._seal_one_block_at_simulated_time()
+                if not block:
+                    break
+                sealed += 1
+            self.stdout.write(self.style.SUCCESS(f"Final sealing done. blocks_created={sealed}"))
+
+        if opts["verify_chain"]:
+            res = verify_chain()
+            if res.get("ok"):
+                self.stdout.write(self.style.SUCCESS(f"Audit chain OK. blocks={res['blocks']}"))
+            else:
+                raise CommandError(f"Audit chain FAILED: {res}")
+
+        if opts.get("export_execution_dataset"):
+            call_command("export_execution_dataset", out=opts["export_execution_dataset"])
+            self.stdout.write(
+                self.style.SUCCESS(
+                    f"Execution dataset exported to {opts['export_execution_dataset']}"
+                )
+            )
+
+        self.stdout.write(
+            self.style.SUCCESS(
+                f"Simulation series done – shifts={shifts_count}, first_date={base_shift_date.isoformat()}, last_date={(base_shift_date + timedelta(days=shifts_count - 1)).isoformat()}"
+            )
+        )
+
+    def _simulate_one_shift(self, *args, **opts):
         rng = random.Random(int(opts["seed"]))
         dispatch_rate = float(opts["dispatch_rate"])
         seal_every = int(opts["seal_every"])
@@ -290,6 +375,7 @@ class Command(BaseCommand):
                     "Employees sampled for shift – " + ", ".join(e.employee_code for e in employees)
                 )
             )
+            self._ensure_employee_profiles(employees)
             self._ensure_skus()
 
             shift_start = self._aware_datetime(shift_date, time(hour=9, minute=0))
@@ -307,7 +393,7 @@ class Command(BaseCommand):
                 start_shift(shift)
 
             task_pool, _ = TaskPool.objects.get_or_create(name="Общий пул")
-            speed_profiles = self._make_speed_profiles(employees, rng)
+            speed_profiles = self._make_speed_profiles(employees)
             employee_available_at = {
                 e.id: shift_start + timedelta(minutes=rng.randint(0, 6)) for e in employees
             }
@@ -702,29 +788,6 @@ class Command(BaseCommand):
                 if shift.is_active:
                     close_shift(shift)
 
-            if opts["final_seal"]:
-                sealed = 0
-                while True:
-                    block = self._seal_one_block_at_simulated_time()
-                    if not block:
-                        break
-                    sealed += 1
-                self.stdout.write(self.style.SUCCESS(f"Final sealing done. blocks_created={sealed}"))
-
-            if opts["verify_chain"]:
-                res = verify_chain()
-                if res.get("ok"):
-                    self.stdout.write(self.style.SUCCESS(f"Audit chain OK. blocks={res['blocks']}"))
-                else:
-                    raise CommandError(f"Audit chain FAILED: {res}")
-
-            if opts.get("export_execution_dataset"):
-                call_command("export_execution_dataset", out=opts["export_execution_dataset"])
-                self.stdout.write(
-                    self.style.SUCCESS(
-                        f"Execution dataset exported to {opts['export_execution_dataset']}"
-                    )
-                )
 
             self.stdout.write(
                 self.style.SUCCESS(
@@ -966,7 +1029,10 @@ class Command(BaseCommand):
     def _get_active_employee_pool(self) -> list[Employee]:
         return list(
             Employee.objects.filter(is_active=True)
-            .prefetch_related("qualifications")
+            .prefetch_related(
+                "qualifications",
+                "task_profiles__qualification_modifiers__employee_qualification__qualification",
+            )
             .order_by("id")
         )
 
@@ -1085,13 +1151,45 @@ class Command(BaseCommand):
             base += 1.5
         return max(3, int(round(base)))
 
-    def _make_speed_profiles(self, employees: list[Employee], rng: random.Random) -> dict[int, dict[str, float]]:
-        speeds: dict[int, dict[str, float]] = {}
+    def _ensure_employee_profiles(self, employees: list[Employee]) -> None:
+        expected_task_types = {value for value, _ in Task.TaskType.choices}
+        missing_by_employee: dict[str, list[str]] = {}
+
         for employee in employees:
-            per_type: dict[str, float] = {}
-            base = rng.uniform(0.90, 1.10)
-            for task_type in TASK_PROFILES:
-                per_type[task_type] = base * rng.uniform(0.85, 1.18)
+            profiles = list(employee.task_profiles.all())
+            present = {profile.task_type for profile in profiles}
+            missing = sorted(expected_task_types - present)
+            if missing:
+                missing_by_employee[employee.employee_code] = missing
+
+        if missing_by_employee:
+            parts = [
+                f"{employee_code}: {', '.join(task_types)}"
+                for employee_code, task_types in sorted(missing_by_employee.items())
+            ]
+            raise CommandError(
+                "Не у всех выбранных сотрудников есть профили EmployeeTaskProfile по всем типам задач. "
+                "Отсутствуют профили у: " + " | ".join(parts)
+            )
+
+    def _make_speed_profiles(self, employees: list[Employee]) -> dict[int, dict[str, dict[str, object]]]:
+        speeds: dict[int, dict[str, dict[str, object]]] = {}
+        for employee in employees:
+            per_type: dict[str, dict[str, object]] = {}
+            for profile in employee.task_profiles.all():
+                modifiers: dict[str, dict[str, float]] = {}
+                for modifier in profile.qualification_modifiers.all():
+                    qual = modifier.employee_qualification.qualification
+                    modifiers[qual.code] = {
+                        "factor": float(modifier.factor),
+                        "sigma_bonus": float(modifier.sigma_bonus),
+                    }
+
+                per_type[profile.task_type] = {
+                    "performance_factor": float(profile.performance_factor),
+                    "sigma": float(profile.sigma),
+                    "modifiers": modifiers,
+                }
             speeds[employee.id] = per_type
         return speeds
 
@@ -1103,7 +1201,7 @@ class Command(BaseCommand):
         cargo: Optional[Cargo],
         employee: Employee,
         shift: Shift,
-        speed_profiles: dict[int, dict[str, float]],
+        speed_profiles: dict[int, dict[str, dict[str, object]]],
         rng: random.Random,
     ) -> int:
         stats = EmployeeShiftStats.objects.get(employee=employee, shift=shift)
@@ -1116,9 +1214,24 @@ class Command(BaseCommand):
                 base += 0.5
         load_penalty = 1.0 + min(stats.task_assigned_count or 0, 20) * 0.008
         score_penalty = 1.0 + min(stats.shift_score or 0, 40) * 0.002
-        noise = max(0.75, rng.gauss(1.0, 0.12))
-        speed = max(0.82, speed_profiles[employee.id][profile.task_type])
-        minutes = (base * load_penalty * score_penalty * noise) / speed
+
+        employee_profile = speed_profiles[employee.id][profile.task_type]
+        performance_factor = max(0.10, float(employee_profile["performance_factor"]))
+        sigma = max(0.01, float(employee_profile["sigma"]))
+
+        required_codes = set(task.required_qualifications.values_list("code", flat=True))
+        modifier_factor = 1.0
+        sigma_bonus = 0.0
+        for qual_code in required_codes:
+            modifier = employee_profile["modifiers"].get(qual_code)
+            if modifier:
+                modifier_factor *= max(0.10, float(modifier["factor"]))
+                sigma_bonus += max(0.0, float(modifier["sigma_bonus"]))
+
+        effective_sigma = min(0.35, sigma + sigma_bonus)
+        noise = max(0.70, rng.gauss(1.0, effective_sigma))
+
+        minutes = base * performance_factor * modifier_factor * load_penalty * score_penalty * noise
         return max(2, int(round(minutes)))
 
     def _resolve_required_qualification_codes(
@@ -1298,7 +1411,7 @@ class Command(BaseCommand):
         payload: dict,
         quals: dict[str, Qualification],
         rng: random.Random,
-        speed_profiles: dict[int, dict[str, float]],
+        speed_profiles: dict[int, dict[str, dict[str, object]]],
         shift_end: datetime,
         forklift_mix_rate: float,
         employee_available_at: dict[int, datetime],
@@ -1390,7 +1503,7 @@ class Command(BaseCommand):
         topology: TopologyContext,
         quals: dict[str, Qualification],
         rng: random.Random,
-        speed_profiles: dict[int, dict[str, float]],
+        speed_profiles: dict[int, dict[str, dict[str, object]]],
         dispatch_rate: float,
         internal_move_rate: float,
         seal_every: int,
@@ -1771,7 +1884,7 @@ class Command(BaseCommand):
         task_pool: TaskPool,
         quals: dict[str, Qualification],
         rng: random.Random,
-        speed_profiles: dict[int, dict[str, float]],
+        speed_profiles: dict[int, dict[str, dict[str, object]]],
         general_schedule: list[datetime],
         next_general_idx: int,
         created_general: int,
@@ -1903,7 +2016,7 @@ class Command(BaseCommand):
         topology: TopologyContext,
         quals: dict[str, Qualification],
         rng: random.Random,
-        speed_profiles: dict[int, dict[str, float]],
+        speed_profiles: dict[int, dict[str, dict[str, object]]],
         shift_end: datetime,
         forklift_mix_rate: float,
         employee_available_at: dict[int, datetime],
@@ -1957,7 +2070,7 @@ class Command(BaseCommand):
         topology: TopologyContext,
         quals: dict[str, Qualification],
         rng: random.Random,
-        speed_profiles: dict[int, dict[str, float]],
+        speed_profiles: dict[int, dict[str, dict[str, object]]],
         shift_end: datetime,
         forklift_mix_rate: float,
         employee_available_at: dict[int, datetime],
@@ -2011,7 +2124,7 @@ class Command(BaseCommand):
         topology: TopologyContext,
         quals: dict[str, Qualification],
         rng: random.Random,
-        speed_profiles: dict[int, dict[str, float]],
+        speed_profiles: dict[int, dict[str, dict[str, object]]],
         shift_end: datetime,
         forklift_mix_rate: float,
         employee_available_at: dict[int, datetime],
@@ -2119,7 +2232,7 @@ class Command(BaseCommand):
         task_pool: TaskPool,
         quals: dict[str, Qualification],
         rng: random.Random,
-        speed_profiles: dict[int, dict[str, float]],
+        speed_profiles: dict[int, dict[str, dict[str, object]]],
         general_schedule: list[datetime],
         next_general_idx: int,
         shift_end: datetime,
