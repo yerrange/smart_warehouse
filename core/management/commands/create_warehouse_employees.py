@@ -1,5 +1,3 @@
-# python manage.py create_warehouse_employees 30
-
 
 from __future__ import annotations
 
@@ -11,7 +9,7 @@ from dataclasses import dataclass
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
-from core.models import Employee, Qualification
+from core.models import Employee, Qualification, EmployeeQualification
 
 
 BASE_QUALS: list[tuple[str, str, str]] = [
@@ -280,9 +278,32 @@ class Command(BaseCommand):
         target_codes: set[str],
         quals: dict[str, Qualification],
     ) -> bool:
-        target_quals = [quals[code] for code in sorted(target_codes) if code in quals]
-        existing_codes = set(employee.qualifications.values_list("code", flat=True))
+        existing_links = {
+            eq.qualification.code: eq
+            for eq in EmployeeQualification.objects.select_related("qualification").filter(employee=employee)
+        }
+        existing_codes = set(existing_links.keys())
+
         if existing_codes == target_codes:
             return False
-        employee.qualifications.set(target_quals)
+
+        # Удаляем лишние связи. Каскадно удалятся и EmployeeTaskQualificationModifier.
+        codes_to_remove = existing_codes - target_codes
+        if codes_to_remove:
+            EmployeeQualification.objects.filter(
+                employee=employee,
+                qualification__code__in=codes_to_remove,
+            ).delete()
+
+        # Создаём недостающие связи.
+        codes_to_add = target_codes - existing_codes
+        for code in sorted(codes_to_add):
+            qual = quals.get(code)
+            if qual is None:
+                continue
+            EmployeeQualification.objects.get_or_create(
+                employee=employee,
+                qualification=qual,
+            )
+
         return True
