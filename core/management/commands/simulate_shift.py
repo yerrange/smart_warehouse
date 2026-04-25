@@ -174,7 +174,7 @@ class Command(BaseCommand):
         parser.add_argument(
             "--dispatch-rate",
             type=float,
-            default=0.8,
+            default=0.5,
             help="Probability that a stored cargo will be moved to OUTBOUND and dispatched",
         )
         parser.add_argument(
@@ -235,7 +235,7 @@ class Command(BaseCommand):
         parser.add_argument(
             "--forklift-mix-rate",
             type=float,
-            default=0.35,
+            default=0.2,
             help="Probability to additionally require FORKLIFT for a cargo task",
         )
 
