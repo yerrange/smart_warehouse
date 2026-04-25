@@ -127,3 +127,9 @@ python manage.py simulate_warehouse_history_final \
   --shift-date 2026-04-24 \
   --final-seal \
   --verify-chain
+
+
+python manage.py train_task_assigner ^
+  --dataset ml_data/execution_dataset.csv ^
+  --model-out ml_artifacts/models/task_assigner_v1.cbm ^
+  --meta-out ml_artifacts/models/task_assigner_v1.meta.json
