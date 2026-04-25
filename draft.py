@@ -107,4 +107,23 @@ celery -A smart_warehouse beat   -l WARNING
 python manage.py simulate_history --purge --reset-stats --employees 12 --tasks 300 --dataset-out ml_data/sim_dataset.csv
 python manage.py train_task_assigner --dataset ml_data/sim_dataset.csv
 
-def
+python manage.py simulate_warehouse_history_final \
+  --ensure-topology \
+  --cargos 6 \
+  --general-tasks 8 \
+  --seed 44 \
+  --shift-date 2026-04-25 \
+  --final-seal \
+  --verify-chain \
+  --export-execution-dataset ml_data/execution_dataset.csv
+
+
+  python manage.py simulate_warehouse_history \
+  --purge \
+  --ensure-topology \
+  --cargos 6 \
+  --general-tasks 4 \
+  --seed 42 \
+  --shift-date 2026-04-24 \
+  --final-seal \
+  --verify-chain

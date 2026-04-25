@@ -65,9 +65,9 @@ def main():
     ensure_superuser(username="admin", email="admin@admin.com", password="admin")
 
     print("=== Шаг 4–6. Скрипты инициализации данных ===")
-    run_seed_script("create_employees.py")
+    # run_seed_script("create_employees.py")
     run_seed_script("create_locations.py")
-    run_seed_script("create_cargos.py")
+    # run_seed_script("create_cargos.py")
 
     print("🎉 Готово!")
 
