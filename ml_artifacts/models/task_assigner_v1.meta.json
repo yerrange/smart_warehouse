@@ -1,6 +1,6 @@
 {
   "model_type": "CatBoostRegressor",
-  "loss_function": "MAE",
+  "feature_version": "v1_employee_task_profiles",
   "feature_cols": [
     "task_type",
     "priority",
@@ -10,18 +10,139 @@
     "emp_task_assigned_count",
     "emp_task_completed_count",
     "emp_shift_score",
-    "minutes_into_shift"
+    "minutes_into_shift",
+    "emp_profile_performance_factor",
+    "emp_profile_sigma",
+    "emp_profile_sample_count",
+    "emp_profile_mean_minutes",
+    "emp_profile_has_mean",
+    "emp_profile_source_kind",
+    "task_required_qual_count",
+    "emp_modifier_factor_product",
+    "emp_modifier_sigma_bonus_sum",
+    "emp_modifier_sample_count_sum",
+    "emp_required_modifier_count"
   ],
   "cat_cols": [
-    "task_type"
+    "task_type",
+    "emp_profile_source_kind"
   ],
-  "dataset": "ml_data\\sim_dataset.csv",
+  "target_col": "label_true_minutes",
+  "group_col": "task_id",
+  "dataset": "ml_data\\execution_dataset.csv",
   "seed": 42,
-  "iterations": 460,
+  "params": {
+    "loss_function": "MAE",
+    "eval_metric": "MAE",
+    "iterations_requested": 800,
+    "iterations_used": 56,
+    "depth": 8,
+    "learning_rate": 0.06,
+    "test_size": 0.2
+  },
+  "training": {
+    "rows_in_csv": 2776,
+    "valid_training_rows": 2776,
+    "rows_dropped_by_target": 0,
+    "task_groups": 2776,
+    "train_rows": 2220,
+    "validation_rows": 556,
+    "train_task_groups": 2220,
+    "validation_task_groups": 556
+  },
+  "target_stats": {
+    "min": 8.0,
+    "max": 60.0,
+    "mean": 21.484870317002883,
+    "median": 22.0,
+    "std": 5.516198459471651
+  },
   "metrics": {
-    "mae": 4.551065028598302,
-    "rmse": 6.28318191459858,
-    "baseline_mae": 12.500239006745442,
-    "baseline_rmse": 15.724552426623246
-  }
+    "mae": 2.3238010781498004,
+    "rmse": 3.082735756852343,
+    "baseline_mae": 4.126604122107719,
+    "baseline_rmse": 5.21894113813905
+  },
+  "feature_importance": [
+    {
+      "feature": "estimated_minutes",
+      "importance": 22.285799819018116
+    },
+    {
+      "feature": "emp_profile_mean_minutes",
+      "importance": 16.441510405791433
+    },
+    {
+      "feature": "emp_profile_performance_factor",
+      "importance": 12.406074514160144
+    },
+    {
+      "feature": "difficulty",
+      "importance": 10.00227639309817
+    },
+    {
+      "feature": "task_required_qual_count",
+      "importance": 5.214882464973916
+    },
+    {
+      "feature": "task_type",
+      "importance": 4.827127583899023
+    },
+    {
+      "feature": "emp_task_completed_count",
+      "importance": 4.399138560987124
+    },
+    {
+      "feature": "minutes_into_shift",
+      "importance": 3.1158595889505385
+    },
+    {
+      "feature": "task_age_minutes",
+      "importance": 2.8337321669564997
+    },
+    {
+      "feature": "emp_shift_score",
+      "importance": 2.8306798350464515
+    },
+    {
+      "feature": "emp_task_assigned_count",
+      "importance": 2.7478489523796203
+    },
+    {
+      "feature": "priority",
+      "importance": 2.568430774613311
+    },
+    {
+      "feature": "emp_profile_sigma",
+      "importance": 2.330755177381714
+    },
+    {
+      "feature": "emp_profile_sample_count",
+      "importance": 2.256832383426282
+    },
+    {
+      "feature": "emp_required_modifier_count",
+      "importance": 1.8348326729955486
+    },
+    {
+      "feature": "emp_modifier_sample_count_sum",
+      "importance": 1.502900207496041
+    },
+    {
+      "feature": "emp_modifier_factor_product",
+      "importance": 1.396374681997035
+    },
+    {
+      "feature": "emp_modifier_sigma_bonus_sum",
+      "importance": 0.5645066524279763
+    },
+    {
+      "feature": "emp_profile_source_kind",
+      "importance": 0.325032425108587
+    },
+    {
+      "feature": "emp_profile_has_mean",
+      "importance": 0.11540473929247608
+    }
+  ]
 }

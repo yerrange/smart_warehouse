@@ -1,17 +1,19 @@
 from django.contrib import admin
 from django import forms
 from django.core.exceptions import ValidationError
-from django.db import models
 import re
 
 from core.models import (
     Employee,
     Qualification,
+    EmployeeQualification,
     Shift,
     EmployeeShiftStats,
     Task,
     TaskAssignmentLog,
     TaskPool,
+    EmployeeTaskProfile,
+    EmployeeTaskQualificationModifier,
     Cargo,
     CargoEvent,
     StorageLocation,
@@ -53,30 +55,52 @@ class EmployeeShiftStatsInline(admin.TabularInline):
     readonly_fields = ("is_busy", "task_assigned_count", "task_completed_count", "shift_score", "last_task_at")
 
 
+class EmployeeQualificationInline(admin.TabularInline):
+    model = EmployeeQualification
+    extra = 0
+    autocomplete_fields = ("qualification",)
+    fields = ("qualification", "created_at")
+    readonly_fields = ("created_at",)
+
+
+class EmployeeTaskQualificationModifierInline(admin.TabularInline):
+    model = EmployeeTaskQualificationModifier
+    extra = 0
+    autocomplete_fields = ("employee_qualification",)
+    fields = ("employee_qualification", "factor", "sigma_bonus", "sample_count", "source_kind", "created_at", "updated_at")
+    readonly_fields = ("created_at", "updated_at")
+
+
 # === Employee ===
 
 class EmployeeForm(forms.ModelForm):
     class Meta:
         model = Employee
-        fields = ['first_name', 'last_name', 'employee_code', 'qualifications', 'is_active']
-        widgets = {
-            'qualifications': forms.CheckboxSelectMultiple
-        }
+        fields = ['first_name', 'last_name', 'employee_code', 'is_active']
 
     def clean_employee_code(self):
         code = self.cleaned_data['employee_code']
-        if not re.fullmatch(r"E\d{3}", code):
-            raise ValidationError("Код сотрудника должен быть в формате E###, например E001.")
+        if not re.fullmatch(r"[A-Za-z]+\d{3,}", code):
+            raise ValidationError("Код сотрудника должен быть в формате PREFIXNNN, например E001 или E0001.")
         return code
 
 
 @admin.register(Employee)
 class EmployeeAdmin(admin.ModelAdmin):
     form = EmployeeForm
-    list_display = ("employee_code", "first_name", "last_name", "is_active")
+    list_display = ("employee_code", "first_name", "last_name", "is_active", "qualification_codes")
     search_fields = ("employee_code", "first_name", "last_name")
-    list_filter = ("is_active", "qualifications")
-    filter_horizontal = ("qualifications",)
+    list_filter = ("is_active",)
+    inlines = [EmployeeQualificationInline]
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs.prefetch_related("employee_qualifications__qualification")
+
+    def qualification_codes(self, obj):
+        quals = [eq.qualification.code for eq in obj.employee_qualifications.all()]
+        return ", ".join(sorted(quals)) if quals else "—"
+    qualification_codes.short_description = "Квалификации"
 
 
 # === Qualification ===
@@ -85,6 +109,14 @@ class EmployeeAdmin(admin.ModelAdmin):
 class QualificationAdmin(admin.ModelAdmin):
     list_display = ("code", "name")
     search_fields = ("code", "name")
+
+
+@admin.register(EmployeeQualification)
+class EmployeeQualificationAdmin(admin.ModelAdmin):
+    list_display = ("employee", "qualification", "created_at")
+    search_fields = ("employee__employee_code", "employee__first_name", "employee__last_name", "qualification__code", "qualification__name")
+    list_filter = ("qualification",)
+    autocomplete_fields = ("employee", "qualification")
 
 
 # === Shift & EmployeeShiftStats ===
@@ -230,3 +262,32 @@ class TaskPoolAdmin(admin.ModelAdmin):
     search_fields = ("name",)
     list_filter = ("is_active", "auto_assign_enabled")
     inlines = [TaskInline]
+
+
+# === EmployeeTaskProfile / EmployeeTaskQualificationModifier ===
+
+@admin.register(EmployeeTaskProfile)
+class EmployeeTaskProfileAdmin(admin.ModelAdmin):
+    list_display = ("employee", "task_type", "performance_factor", "sigma", "sample_count", "source_kind", "updated_at")
+    list_filter = ("task_type", "source_kind")
+    search_fields = ("employee__employee_code", "employee__first_name", "employee__last_name")
+    autocomplete_fields = ("employee",)
+    inlines = [EmployeeTaskQualificationModifierInline]
+
+
+@admin.register(EmployeeTaskQualificationModifier)
+class EmployeeTaskQualificationModifierAdmin(admin.ModelAdmin):
+    list_display = ("profile", "qualification_code", "factor", "sigma_bonus", "sample_count", "source_kind")
+    list_filter = ("source_kind", "employee_qualification__qualification")
+    search_fields = (
+        "profile__employee__employee_code",
+        "profile__employee__first_name",
+        "profile__employee__last_name",
+        "employee_qualification__qualification__code",
+        "employee_qualification__qualification__name",
+    )
+    autocomplete_fields = ("profile", "employee_qualification")
+
+    def qualification_code(self, obj):
+        return obj.employee_qualification.qualification.code
+    qualification_code.short_description = "Квалификация"

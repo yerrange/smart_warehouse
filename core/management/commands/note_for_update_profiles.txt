@@ -1,0 +1,5 @@
+БЕЗ ИЗМЕНЕНИЯ БД
+python manage.py update_employee_task_profiles --only-simulated --min-shifts 3 --min-tasks 5 --dry-run
+
+С ИЗМЕНЕНИЕМ БД
+python manage.py update_employee_task_profiles --only-simulated --min-shifts 5 --min-tasks 10

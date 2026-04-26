@@ -1,5 +1,6 @@
 from django.db import models, transaction
 from django.core.validators import MinValueValidator, MaxValueValidator
+from django.core.exceptions import ValidationError
 from django.utils.translation import gettext_lazy as _
 from django.db.models import Q, F
 from django.utils.timezone import now
@@ -14,7 +15,12 @@ class Employee(models.Model):
     last_name = models.CharField(max_length=50)
     employee_code = models.CharField(max_length=20, unique=True)
 
-    qualifications = models.ManyToManyField('Qualification', blank=True)
+    qualifications = models.ManyToManyField(
+        'Qualification',
+        through='EmployeeQualification',
+        related_name='employees',
+        blank=True
+    )
 
     is_active = models.BooleanField(default=True, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
@@ -43,7 +49,42 @@ class Qualification(models.Model):
         return f"{self.name} ({self.code})"
 
 
-# ===== Конец блока "Сотрудники"
+# === Связь сотрудника с квалификацией ===
+class EmployeeQualification(models.Model):
+    employee = models.ForeignKey(
+        'Employee',
+        on_delete=models.CASCADE,
+        related_name='employee_qualifications',
+        db_index=True
+    )
+    qualification = models.ForeignKey(
+        'Qualification',
+        on_delete=models.CASCADE,
+        related_name='employee_qualifications',
+        db_index=True
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        verbose_name = 'Квалификация сотрудника'
+        verbose_name_plural = 'Квалификации сотрудников'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['employee', 'qualification'],
+                name='uniq_employee_qualification'
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['employee', 'qualification']),
+            models.Index(fields=['qualification']),
+        ]
+
+    def __str__(self):
+        return f"{self.employee.employee_code} | {self.qualification.code}"
+
+
+# ===== Конец блока "Сотрудники" =====
 
 
 
@@ -328,6 +369,177 @@ class TaskPool(models.Model):
 
 
 
+# ===== Начало блока "Профили сотрудников" =====
+
+
+# === Базовый профиль сотрудника по типу задач ===
+class EmployeeTaskProfile(models.Model):
+    class SourceKind(models.TextChoices):
+        SYNTHETIC = "synthetic", "Synthetic"
+        REAL = "real", "Real"
+        MIXED = "mixed", "Mixed"
+
+    employee = models.ForeignKey(
+        'Employee',
+        on_delete=models.CASCADE,
+        related_name='task_profiles',
+        verbose_name='Сотрудник',
+    )
+
+    task_type = models.CharField(
+        max_length=40,
+        choices=Task.TaskType.choices,
+        db_index=True,
+        verbose_name='Тип задачи',
+    )
+
+    performance_factor = models.FloatField(
+        default=1.0,
+        validators=[MinValueValidator(0.1)],
+        verbose_name='Коэффициент производительности',
+        help_text='Меньше 1.0 – сотрудник обычно быстрее среднего по этому типу задач, больше 1.0 – медленнее.',
+    )
+
+    sigma = models.FloatField(
+        default=0.10,
+        validators=[MinValueValidator(0.0)],
+        verbose_name='Разброс',
+        help_text='Насколько стабильно сотрудник выполняет этот тип задач.',
+    )
+
+    sample_count = models.PositiveIntegerField(
+        default=0,
+        verbose_name='Число наблюдений',
+        help_text='Сколько выполненных задач лежит в основе профиля.',
+    )
+
+    mean_minutes = models.FloatField(
+        null=True,
+        blank=True,
+        verbose_name='Среднее фактическое время',
+        help_text='Служебное поле для аналитики и пересчёта профиля.',
+    )
+
+    source_kind = models.CharField(
+        max_length=16,
+        choices=SourceKind.choices,
+        default=SourceKind.SYNTHETIC,
+        verbose_name='Источник профиля',
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Профиль сотрудника по типу задач'
+        verbose_name_plural = 'Профили сотрудников по типам задач'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['employee', 'task_type'],
+                name='uniq_employee_task_profile',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['employee', 'task_type']),
+            models.Index(fields=['task_type']),
+            models.Index(fields=['source_kind']),
+        ]
+
+    def __str__(self):
+        return f"{self.employee.employee_code} | {self.task_type}"
+
+
+# === Поправка к профилю сотрудника по конкретной квалификации ===
+class EmployeeTaskQualificationModifier(models.Model):
+    class SourceKind(models.TextChoices):
+        SYNTHETIC = "synthetic", "Synthetic"
+        REAL = "real", "Real"
+        MIXED = "mixed", "Mixed"
+
+    profile = models.ForeignKey(
+        'EmployeeTaskProfile',
+        on_delete=models.CASCADE,
+        related_name='qualification_modifiers',
+        verbose_name='Базовый профиль',
+    )
+
+    employee_qualification = models.ForeignKey(
+        'EmployeeQualification',
+        on_delete=models.CASCADE,
+        related_name='task_modifiers',
+        verbose_name='Квалификация сотрудника',
+    )
+
+    factor = models.FloatField(
+        default=1.0,
+        validators=[MinValueValidator(0.1)],
+        verbose_name='Поправочный коэффициент',
+        help_text='Дополнительный множитель, если задача этого типа требует данную квалификацию.',
+    )
+
+    sigma_bonus = models.FloatField(
+        default=0.0,
+        validators=[MinValueValidator(0.0)],
+        verbose_name='Добавка к разбросу',
+        help_text='Насколько наличие этой квалификации влияет на вариативность времени.',
+    )
+
+    sample_count = models.PositiveIntegerField(
+        default=0,
+        verbose_name='Число наблюдений',
+        help_text='Сколько наблюдений лежит в основе этой поправки.',
+    )
+
+    source_kind = models.CharField(
+        max_length=16,
+        choices=SourceKind.choices,
+        default=SourceKind.SYNTHETIC,
+        verbose_name='Источник поправки',
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Поправка профиля по квалификации'
+        verbose_name_plural = 'Поправки профилей по квалификациям'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['profile', 'employee_qualification'],
+                name='uniq_profile_employee_qualification_modifier',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['employee_qualification']),
+            models.Index(fields=['source_kind']),
+        ]
+
+    def clean(self):
+        super().clean()
+        if self.profile_id and self.employee_qualification_id:
+            if self.profile.employee_id != self.employee_qualification.employee_id:
+                raise ValidationError(
+                    'Профиль и employee_qualification должны относиться к одному и тому же сотруднику.'
+                )
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    @property
+    def qualification(self):
+        return self.employee_qualification.qualification
+
+    def __str__(self):
+        return f"{self.profile} + {self.employee_qualification.qualification.code}"
+
+
+# ===== Конец блока "Профили сотрудников" =====
+
+
+
+
+
 # ===== Начало блока "Грузы"
 
 
@@ -424,7 +636,6 @@ class Cargo(models.Model):
     def __str__(self):
         where = self.current_slot.code if self.current_slot_id else '—'
         return f"{self.cargo_code}"
-
 
 
 # === История работы с грузом ===

@@ -1,3 +1,6 @@
+python manage.py simulate_shift --employees-on-shift 15 --cargos 35 --general-tasks 15 --forklift-mix-rate 0.2 --seed 42 --shift-date 2026-04-28 --final-seal
+
+
 Базовый реалистичный режим
 
 cargos = 30
