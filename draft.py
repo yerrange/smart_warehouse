@@ -146,3 +146,11 @@ python manage.py simulate_shift \
   --shift-date 2026-06-05 \
   --final-seal \
   --shifts-count 5
+
+
+  python manage.py create_general_tasks 10 \
+  --priority 2 \
+  --difficulty 2 \
+  --estimated-minutes 12 \
+  --vary \
+  --external-prefix MANUAL-GEN
