@@ -1,0 +1,11 @@
+--employees-on-shift 15 ^
+--cargos 35 ^
+--general-tasks 15 ^
+--dispatch-rate 0.8 ^
+--internal-move-rate 0.45 ^
+--forklift-mix-rate 0.2 ^
+--seed 100 ^
+--shift-date 2026-07-01 ^
+--shifts-count 20 ^
+--final-seal ^
+--verify-chain
