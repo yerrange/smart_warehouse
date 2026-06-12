@@ -160,42 +160,64 @@ def seal_block(max_events: int = 512) -> Block | None:
 
 
 def verify_chain() -> dict:
-    blocks = list(
-        Block.objects.order_by("index")
-        .prefetch_related("items", "items__event"))
-    prev = None
-    for block in blocks:
+    prev_block_hash = None
+    checked_blocks = 0
+
+    blocks_qs = (
+        Block.objects
+        .order_by("index")
+        .only("id", "index", "created_at", "prev_block_hash", "merkle_root", "block_hash")
+    )
+
+    for block in blocks_qs.iterator(chunk_size=200):
         expected = _sha256_hex(
             _canon_json(
                 {
                     "index": block.index,
                     "created_at": block.created_at.isoformat(),
-                    "prev": block.prev_block_hash, "merkle": block.merkle_root,
+                    "prev": block.prev_block_hash,
+                    "merkle": block.merkle_root,
                 }
             )
         )
+
         if expected != block.block_hash:
             return {
                 "ok": False,
                 "where": f"block_hash mismatch at index {block.index}"
             }
-        if (prev is None and block.prev_block_hash is not None) \
-                or (prev and block.prev_block_hash != prev.block_hash):
+
+        if checked_blocks == 0:
+            if block.prev_block_hash is not None:
+                return {
+                    "ok": False,
+                    "where": f"prev_link mismatch at index {block.index}"
+                }
+        elif block.prev_block_hash != prev_block_hash:
             return {
                 "ok": False,
                 "where": f"prev_link mismatch at index {block.index}"
             }
 
-        leaves = [item.leaf_hash for item in block.items.order_by("leaf_index")]
+        items = list(
+            BlockMembership.objects
+            .filter(block_id=block.id)
+            .select_related("event")
+            .order_by("leaf_index")
+        )
+
+        leaves = [item.leaf_hash for item in items]
         root, _ = merkle_root_for_leaves(leaves)
+
         if root != block.merkle_root:
             return {
                 "ok": False,
                 "where": f"merkle_root mismatch at index {block.index}"
             }
 
-        for item in block.items.all():
+        for item in items:
             event = item.event
+
             recomputed = compute_event_hash(
                 actor_type=event.actor_type,
                 actor_id=event.actor_id,
@@ -207,6 +229,7 @@ def verify_chain() -> dict:
                 meta=event.meta,
                 created_at_iso=event.created_at.isoformat(),
             )
+
             if recomputed != event.event_hash or item.leaf_hash != event.event_hash:
                 return {
                     "ok": False,
@@ -219,5 +242,8 @@ def verify_chain() -> dict:
                         f"action={event.action}"
                     )
                 }
-        prev = block
-    return {"ok": True, "blocks": len(blocks)}
+
+        prev_block_hash = block.block_hash
+        checked_blocks += 1
+
+    return {"ok": True, "blocks": checked_blocks}

@@ -16,6 +16,7 @@ from django.core.management import call_command
 from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 from django.db import transaction
+from django.db.models import Q
 
 import audit.services as audit_services
 import core.models as core_models
@@ -222,6 +223,11 @@ class Command(BaseCommand):
             help="Delete previously generated simulated tasks/cargos/logs before run (audit is kept intact)",
         )
         parser.add_argument(
+            "--purge-all-simulated",
+            action="store_true",
+            help="Delete all previously generated SIMSHIFT tasks/cargos before the first simulated shift. Useful for rebuilding a dataset from a clean simulated warehouse state.",
+        )
+        parser.add_argument(
             "--ensure-topology",
             action="store_true",
             help="If topology is missing, run create_locations.py logic before simulation",
@@ -278,6 +284,9 @@ class Command(BaseCommand):
             current_opts["final_seal"] = False
             current_opts["verify_chain"] = False
             current_opts["export_execution_dataset"] = None
+            if offset > 0:
+                current_opts["purge"] = False
+                current_opts["purge_all_simulated"] = False
 
             self.stdout.write(
                 self.style.NOTICE(
@@ -350,7 +359,9 @@ class Command(BaseCommand):
                     f"запрошено {requested_employees}, доступно {len(active_employee_pool)}."
                 )
 
-            if opts["purge"]:
+            if opts.get("purge_all_simulated"):
+                self._purge_previous("SIMSHIFT")
+            elif opts["purge"]:
                 self._purge_previous(self.external_prefix)
 
             topology = self._ensure_topology_if_needed(bool(opts["ensure_topology"]))
@@ -434,6 +445,8 @@ class Command(BaseCommand):
             created_tasks = 0
             completed_tasks = 0
             unfinished_tasks = 0
+            backlog_tasks_completed = 0
+            backlog_tasks_unfinished = 0
             dispatched_cargos = 0
             created_general = 0
             created_cargos = 0
@@ -465,6 +478,30 @@ class Command(BaseCommand):
                     putaway_quota = min(4, putaway_quota + 1)
                 if shift_progress > 0.45 and rng.random() < 0.25:
                     dispatch_quota = min(4, dispatch_quota + 1)
+
+                # First continue SIMSHIFT tasks returned to the pool by previous shifts.
+                # This prevents INBOUND/OUTBOUND from getting clogged by pending putaway/dispatch tasks.
+                backlog_result = self._run_existing_backlog_tasks(
+                    current_time=local_cursor,
+                    stop_at=wave_end,
+                    shift=shift,
+                    task_pool=task_pool,
+                    topology=topology,
+                    rng=rng,
+                    speed_profiles=speed_profiles,
+                    shift_end=shift_end,
+                    employee_available_at=employee_available_at,
+                    max_tasks=max(2, min(5, requested_employees // 3 + 1)),
+                )
+                if backlog_result["handled"]:
+                    wave_progress = True
+                    completed_tasks += backlog_result["completed_tasks"]
+                    unfinished_tasks += backlog_result["unfinished_tasks"]
+                    backlog_tasks_completed += backlog_result["completed_tasks"]
+                    backlog_tasks_unfinished += backlog_result["unfinished_tasks"]
+                    if backlog_result["completed_tasks"]:
+                        self._maybe_seal(completed_tasks, seal_every, backlog_result["ended_at"])
+                    local_cursor = min(wave_end, local_cursor + timedelta(minutes=rng.randint(1, 3)))
 
                 # Materialize newly arriving cargos only in the first ~2/3 of the shift.
                 while (
@@ -599,6 +636,29 @@ class Command(BaseCommand):
                     unfinished_tasks += res["unfinished_tasks"]
                     if res["completed_tasks"]:
                         self._maybe_seal(completed_tasks, seal_every, res["ended_at"])
+                    local_cursor = min(wave_end, local_cursor + timedelta(minutes=rng.randint(1, 3)))
+
+                # After draining freshly available space, try the backlog once more before admitting new cargo.
+                backlog_result = self._run_existing_backlog_tasks(
+                    current_time=local_cursor,
+                    stop_at=wave_end,
+                    shift=shift,
+                    task_pool=task_pool,
+                    topology=topology,
+                    rng=rng,
+                    speed_profiles=speed_profiles,
+                    shift_end=shift_end,
+                    employee_available_at=employee_available_at,
+                    max_tasks=max(1, min(3, requested_employees // 5 + 1)),
+                )
+                if backlog_result["handled"]:
+                    wave_progress = True
+                    completed_tasks += backlog_result["completed_tasks"]
+                    unfinished_tasks += backlog_result["unfinished_tasks"]
+                    backlog_tasks_completed += backlog_result["completed_tasks"]
+                    backlog_tasks_unfinished += backlog_result["unfinished_tasks"]
+                    if backlog_result["completed_tasks"]:
+                        self._maybe_seal(completed_tasks, seal_every, backlog_result["ended_at"])
                     local_cursor = min(wave_end, local_cursor + timedelta(minutes=rng.randint(1, 3)))
 
                 # Then keep feeding cargo into INBOUND when slots exist.
@@ -794,7 +854,8 @@ class Command(BaseCommand):
                     "Simulation done – "
                     f"run_id={self.run_id}, cargos_created={created_cargos}, cargos_dispatched={dispatched_cargos}/{target_dispatch_cargos}, "
                     f"general_tasks={created_general}, tasks_created={created_tasks}, "
-                    f"completed_tasks={completed_tasks}, unfinished_tasks={unfinished_tasks}"
+                    f"completed_tasks={completed_tasks}, unfinished_tasks={unfinished_tasks}, "
+                    f"backlog_completed={backlog_tasks_completed}, backlog_unfinished={backlog_tasks_unfinished}"
                 )
             )
 
@@ -1935,6 +1996,426 @@ class Command(BaseCommand):
             next_general_idx += 1
         return next_general_idx, created_general, created_tasks, completed_tasks, unfinished_tasks, now_cursor
 
+
+    def _is_simulated_task(self, task: Task) -> bool:
+        return bool(task.external_ref and task.external_ref.startswith("SIMSHIFT"))
+
+    def _slot_is_usable_for_cargo(
+        self,
+        *,
+        slot_code: Optional[str],
+        cargo: Cargo,
+        location_type: Optional[str] = None,
+        exclude_slot_id: Optional[int] = None,
+    ) -> bool:
+        if not slot_code:
+            return False
+        slot = (
+            LocationSlot.objects
+            .select_related("location")
+            .filter(code=slot_code)
+            .first()
+        )
+        if not slot:
+            return False
+        if location_type and slot.location.location_type != location_type:
+            return False
+        if exclude_slot_id and slot.id == exclude_slot_id:
+            return False
+        if slot.location.slot_size_class != cargo.container_type:
+            return False
+        return not Cargo.objects.filter(current_slot=slot).exclude(id=cargo.id).exists()
+
+    def _existing_task_state_is_ready(self, task: Task) -> bool:
+        cargo = task.cargo
+        if not cargo:
+            return False
+
+        slot = cargo.current_slot
+        location_type = slot.location.location_type if slot else None
+
+        if task.task_type == Task.TaskType.RECEIVE_TO_INBOUND:
+            return cargo.status == Cargo.Status.CREATED and slot is None
+
+        if task.task_type == Task.TaskType.PUTAWAY_TO_RACK:
+            return (
+                cargo.status == Cargo.Status.ARRIVED
+                and slot is not None
+                and location_type == StorageLocation.LocationType.INBOUND
+            )
+
+        if task.task_type == Task.TaskType.MOVE_BETWEEN_SLOTS:
+            return (
+                cargo.status == Cargo.Status.STORED
+                and slot is not None
+                and location_type in {
+                    StorageLocation.LocationType.RACK,
+                    StorageLocation.LocationType.OUTBOUND,
+                }
+            )
+
+        if task.task_type == Task.TaskType.DISPATCH_CARGO:
+            return (
+                cargo.status == Cargo.Status.STORED
+                and slot is not None
+                and location_type == StorageLocation.LocationType.OUTBOUND
+            )
+
+        return False
+
+    def _refresh_existing_task_payload(
+        self,
+        *,
+        task: Task,
+        topology: TopologyContext,
+        rng: random.Random,
+        current_time: datetime,
+    ) -> bool:
+        """
+        A SIMSHIFT task can return to the common pool at shift close.
+        Its old target slot may later become occupied, so before executing the
+        task in a new shift we refresh only the target slot part of the payload.
+        """
+        if not task.cargo_id:
+            return task.task_type == Task.TaskType.GENERAL
+
+        task.refresh_from_db()
+        cargo = task.cargo
+        cargo.refresh_from_db()
+
+        if not self._existing_task_state_is_ready(task):
+            return False
+
+        payload = dict(task.payload or {})
+        changed = False
+
+        if task.task_type == Task.TaskType.RECEIVE_TO_INBOUND:
+            if not self._slot_is_usable_for_cargo(
+                slot_code=payload.get("to_slot_code"),
+                cargo=cargo,
+                location_type=StorageLocation.LocationType.INBOUND,
+            ):
+                slot = self._pick_free_slot(
+                    location_type=StorageLocation.LocationType.INBOUND,
+                    size_class=cargo.container_type,
+                    rng=rng,
+                )
+                if not slot:
+                    return False
+                payload["to_slot_code"] = slot.code
+                payload["note"] = payload.get("note") or "SIMSHIFT receive to inbound"
+                changed = True
+
+        elif task.task_type == Task.TaskType.PUTAWAY_TO_RACK:
+            if not self._slot_is_usable_for_cargo(
+                slot_code=payload.get("to_slot_code"),
+                cargo=cargo,
+                location_type=StorageLocation.LocationType.RACK,
+            ):
+                slot = self._pick_free_slot(
+                    location_type=StorageLocation.LocationType.RACK,
+                    size_class=cargo.container_type,
+                    rng=rng,
+                )
+                if not slot:
+                    return False
+                payload["to_slot_code"] = slot.code
+                payload["note"] = payload.get("note") or "SIMSHIFT putaway to rack"
+                changed = True
+
+        elif task.task_type == Task.TaskType.MOVE_BETWEEN_SLOTS:
+            old_target = payload.get("to_slot_code")
+            old_target_slot = (
+                LocationSlot.objects
+                .select_related("location")
+                .filter(code=old_target)
+                .first()
+                if old_target else None
+            )
+            target_location_type = (
+                old_target_slot.location.location_type
+                if old_target_slot
+                else StorageLocation.LocationType.RACK
+            )
+            if target_location_type not in {
+                StorageLocation.LocationType.RACK,
+                StorageLocation.LocationType.OUTBOUND,
+            }:
+                target_location_type = StorageLocation.LocationType.RACK
+
+            if not self._slot_is_usable_for_cargo(
+                slot_code=old_target,
+                cargo=cargo,
+                location_type=target_location_type,
+                exclude_slot_id=cargo.current_slot_id,
+            ):
+                slot = self._pick_free_slot(
+                    location_type=target_location_type,
+                    size_class=cargo.container_type,
+                    rng=rng,
+                    exclude_slot_ids={cargo.current_slot_id} if cargo.current_slot_id else set(),
+                )
+                if not slot:
+                    return False
+                payload["to_slot_code"] = slot.code
+                payload["note"] = payload.get("note") or f"SIMSHIFT move to {target_location_type}"
+                changed = True
+
+        elif task.task_type == Task.TaskType.DISPATCH_CARGO:
+            # No target slot in payload. The readiness check above guarantees OUTBOUND.
+            return True
+
+        else:
+            return False
+
+        if changed:
+            payload["sim"] = True
+            payload["simulation_run"] = self.run_id
+            payload["refreshed_by_simulate_shift"] = True
+            task.payload = payload
+            with self._patched_runtime(current_time):
+                task.save(update_fields=["payload", "updated_at"])
+        return True
+
+    def _backlog_task_priority(self, task: Task) -> tuple[int, datetime, int]:
+        cargo = task.cargo
+        slot = cargo.current_slot if cargo else None
+        location_type = slot.location.location_type if slot else None
+
+        if task.task_type == Task.TaskType.DISPATCH_CARGO and location_type == StorageLocation.LocationType.OUTBOUND:
+            return (0, task.created_at, task.id)
+        if task.task_type == Task.TaskType.PUTAWAY_TO_RACK and location_type == StorageLocation.LocationType.INBOUND:
+            return (1, task.created_at, task.id)
+        if task.task_type == Task.TaskType.MOVE_BETWEEN_SLOTS:
+            payload = task.payload or {}
+            to_slot_code = payload.get("to_slot_code")
+            if to_slot_code and str(to_slot_code).startswith("OUT-"):
+                return (2, task.created_at, task.id)
+            return (3, task.created_at, task.id)
+        if task.task_type == Task.TaskType.RECEIVE_TO_INBOUND:
+            return (4, task.created_at, task.id)
+        return (9, task.created_at, task.id)
+
+    def _select_existing_backlog_task(
+        self,
+        *,
+        shift: Shift,
+        topology: TopologyContext,
+        rng: random.Random,
+        current_time: datetime,
+    ) -> Optional[Task]:
+        tasks = list(
+            Task.objects
+            .select_related(
+                "cargo",
+                "cargo__current_slot",
+                "cargo__current_slot__location",
+                "assigned_to",
+                "shift",
+                "task_pool",
+            )
+            .prefetch_related("required_qualifications")
+            .filter(
+                status=Task.Status.PENDING,
+                cargo__isnull=False,
+                external_ref__startswith="SIMSHIFT",
+            )
+            .filter(Q(shift=shift) | Q(shift__isnull=True))
+            .order_by("created_at", "id")[:240]
+        )
+
+        ready: list[Task] = []
+        for task in tasks:
+            if not self._existing_task_state_is_ready(task):
+                continue
+            if not self._refresh_existing_task_payload(
+                task=task,
+                topology=topology,
+                rng=rng,
+                current_time=current_time,
+            ):
+                continue
+            ready.append(task)
+
+        if not ready:
+            return None
+
+        ready.sort(key=self._backlog_task_priority)
+        return ready[0]
+
+    def _execute_existing_task_lifecycle(
+        self,
+        *,
+        task: Task,
+        current_time: datetime,
+        shift: Shift,
+        task_pool: TaskPool,
+        topology: TopologyContext,
+        rng: random.Random,
+        speed_profiles: dict[int, dict[str, dict[str, object]]],
+        shift_end: datetime,
+        employee_available_at: dict[int, datetime],
+    ) -> TaskExecutionResult:
+        task.refresh_from_db()
+        if task.status != Task.Status.PENDING or not self._is_simulated_task(task):
+            return TaskExecutionResult(task=task, state="skipped", at_time=current_time)
+
+        if task.task_type not in TASK_PROFILES:
+            return TaskExecutionResult(task=task, state="skipped", at_time=current_time)
+
+        if not self._refresh_existing_task_payload(
+            task=task,
+            topology=topology,
+            rng=rng,
+            current_time=current_time,
+        ):
+            return TaskExecutionResult(task=task, state="blocked", at_time=current_time)
+
+        profile = TASK_PROFILES[task.task_type]
+        cargo = task.cargo
+
+        if current_time > shift_end - timedelta(minutes=18):
+            return TaskExecutionResult(task=task, state="pending", at_time=current_time)
+
+        employee = task.assigned_to if task.shift_id == shift.id else None
+        assigned_at = max(current_time, task.assigned_at or current_time) if employee else None
+
+        if employee and employee.id not in employee_available_at:
+            employee = None
+            assigned_at = None
+
+        if not employee:
+            # A returned task may still point to the common pool. Try to assign it inside this shift.
+            for probe_time in self._candidate_assignment_times(
+                created_at=current_time,
+                employee_available_at=employee_available_at,
+                shift_end=shift_end,
+                rng=rng,
+            ):
+                if probe_time >= shift_end - timedelta(minutes=10):
+                    break
+                with self._temporarily_block_unavailable_employees(
+                    shift=shift,
+                    employee_available_at=employee_available_at,
+                    probe_time=probe_time,
+                ):
+                    with self._patched_runtime(probe_time):
+                        shift.refresh_from_db()
+                        employee = assign_task_to_best_employee(task, shift)
+                task.refresh_from_db()
+                if employee:
+                    assigned_at = max(current_time, probe_time)
+                    break
+
+        if not employee or not assigned_at:
+            return TaskExecutionResult(task=task, state="pending", at_time=current_time)
+
+        started_at = max(
+            assigned_at + timedelta(minutes=rng.randint(2, 7)),
+            employee_available_at.get(employee.id, assigned_at),
+            current_time,
+        )
+
+        true_minutes = self._duration_minutes(
+            profile=profile,
+            task=task,
+            cargo=cargo,
+            employee=employee,
+            shift=shift,
+            speed_profiles=speed_profiles,
+            rng=rng,
+        )
+        completed_at = started_at + timedelta(minutes=true_minutes)
+
+        if completed_at > shift_end - timedelta(minutes=4):
+            employee_available_at[employee.id] = max(
+                employee_available_at.get(employee.id, assigned_at),
+                assigned_at + timedelta(minutes=2),
+            )
+            return TaskExecutionResult(task=task, state="assigned", at_time=assigned_at, employee=employee)
+
+        with self._patched_runtime(started_at):
+            ok = start_task(task)
+        if not ok:
+            return TaskExecutionResult(task=task, state="blocked", at_time=started_at, employee=employee)
+
+        task.refresh_from_db()
+        with self._patched_runtime(completed_at):
+            ok = complete_task(task)
+        if not ok:
+            return TaskExecutionResult(task=task, state="blocked", at_time=completed_at, employee=employee)
+
+        task.refresh_from_db()
+        task.actual_minutes = true_minutes
+        with self._patched_runtime(completed_at):
+            task.save(update_fields=["actual_minutes", "updated_at"])
+        employee_available_at[employee.id] = completed_at + timedelta(minutes=rng.randint(1, 3))
+        return TaskExecutionResult(task=task, state="completed", at_time=completed_at, employee=employee)
+
+    def _run_existing_backlog_tasks(
+        self,
+        *,
+        current_time: datetime,
+        stop_at: datetime,
+        shift: Shift,
+        task_pool: TaskPool,
+        topology: TopologyContext,
+        rng: random.Random,
+        speed_profiles: dict[int, dict[str, dict[str, object]]],
+        shift_end: datetime,
+        employee_available_at: dict[int, datetime],
+        max_tasks: int,
+    ) -> dict[str, object]:
+        handled = 0
+        completed_tasks = 0
+        unfinished_tasks = 0
+        last_time = current_time
+
+        for _ in range(max(0, max_tasks)):
+            if current_time >= stop_at or current_time >= shift_end - timedelta(minutes=10):
+                break
+            task = self._select_existing_backlog_task(
+                shift=shift,
+                topology=topology,
+                rng=rng,
+                current_time=current_time,
+            )
+            if not task:
+                break
+
+            result = self._execute_existing_task_lifecycle(
+                task=task,
+                current_time=current_time,
+                shift=shift,
+                task_pool=task_pool,
+                topology=topology,
+                rng=rng,
+                speed_profiles=speed_profiles,
+                shift_end=shift_end,
+                employee_available_at=employee_available_at,
+            )
+
+            if result.state in {"skipped", "blocked"}:
+                # Do not spin forever on one impossible task in the same wave.
+                break
+
+            handled += 1
+            last_time = result.at_time
+            if result.is_completed:
+                completed_tasks += 1
+            else:
+                unfinished_tasks += 1
+
+            current_time = min(stop_at, current_time + timedelta(minutes=rng.randint(1, 4)))
+
+        return {
+            "handled": handled > 0,
+            "ended_at": last_time,
+            "created_tasks": 0,
+            "completed_tasks": completed_tasks,
+            "unfinished_tasks": unfinished_tasks,
+            "dispatched_cargos": 0,
+        }
 
     def _cargo_has_active_tasks(self, cargo: Cargo) -> bool:
         return cargo.task_set.filter(

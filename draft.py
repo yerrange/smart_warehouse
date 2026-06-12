@@ -140,9 +140,17 @@ python manage.py simulate_shift \
   --cargos 40 \
   --general-tasks 15 \
   --dispatch-rate 0.85 \
-  --internal-move-rate 0.4 \
+  --internal-move-rate 0.45 \
   --forklift-mix-rate 0.2 \
   --seed 42 \
-  --shift-date 2026-06-05 \
+  --shift-date 2026-07-01 \
   --final-seal \
-  --shifts-count 5
+  --shifts-count 20
+
+
+  python manage.py create_general_tasks 10 \
+  --priority 2 \
+  --difficulty 2 \
+  --estimated-minutes 12 \
+  --vary \
+  --external-prefix MANUAL-GEN
